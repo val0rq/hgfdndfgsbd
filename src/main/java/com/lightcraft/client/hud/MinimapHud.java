@@ -1,13 +1,11 @@
 package com.lightcraft.client.hud;
 import com.lightcraft.client.minimap.WaypointManager;
+import com.lightcraft.client.gui.HudRenderer;
 import com.lightcraft.config.ModConfig;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.block.MapColor;
-import net.minecraft.util.math.BlockPos;
 
 public class MinimapHud {
     private final ModConfig config;
@@ -28,10 +26,10 @@ public class MinimapHud {
         int y = config.minimapY;
         
         // Background
-        context.fill(x, y, x + size, y + size, 0xFF222222);
-        context.drawBorder(x-1, y-1, size+2, size+2, 0xFF555555);
+        HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF222222);
+        HudRenderer.drawBorderSafe(context, x-1, y-1, size+2, size+2, 0xFF555555);
         
-        context.enableScissor(x, y, x+size, y+size);
+        HudRenderer.enableScissorSafe(context, x, y, x+size, y+size);
         
         // Simple terrain representation (center is player)
         int cx = x + size/2;
@@ -52,7 +50,7 @@ public class MinimapHud {
                 }
                 
                 if (Math.abs(dx) < size/2 && Math.abs(dz) < size/2) {
-                    context.fill(cx + (int)dx - 1, cy + (int)dz - 1, cx + (int)dx + 1, cy + (int)dz + 1, 0xFFFF0000);
+                    HudRenderer.fillSafe(context, cx + (int)dx - 1, cy + (int)dz - 1, cx + (int)dx + 1, cy + (int)dz + 1, 0xFFFF0000);
                 }
             }
         }
@@ -69,12 +67,12 @@ public class MinimapHud {
                 dx = rx; dz = rz;
             }
             if (Math.abs(dx) < size/2 && Math.abs(dz) < size/2) {
-                context.fill(cx + (int)dx - 2, cy + (int)dz - 2, cx + (int)dx + 2, cy + (int)dz + 2, wp.color | 0xFF000000);
+                HudRenderer.fillSafe(context, cx + (int)dx - 2, cy + (int)dz - 2, cx + (int)dx + 2, cy + (int)dz + 2, wp.color | 0xFF000000);
             }
         }
         
         // Player Arrow
-        context.fill(cx - 1, cy - 2, cx + 2, cy + 2, 0xFFFFFFFF);
-        context.disableScissor();
+        HudRenderer.fillSafe(context, cx - 1, cy - 2, cx + 2, cy + 2, 0xFFFFFFFF);
+        HudRenderer.disableScissorSafe(context);
     }
 }
