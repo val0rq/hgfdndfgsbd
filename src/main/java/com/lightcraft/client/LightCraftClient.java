@@ -18,6 +18,8 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Constructor;
+
 public class LightCraftClient implements ClientModInitializer {
     public static final String MOD_ID = "lightcraft";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -36,7 +38,7 @@ public class LightCraftClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         instance = this;
-        LOGGER.info("Initializing LightCraft...");
+        LOGGER.info("Initializing LightCraft for Mounts of Mayhem...");
         
         configManager = new ConfigManager();
         config = configManager.loadConfig();
@@ -45,12 +47,16 @@ public class LightCraftClient implements ClientModInitializer {
         
         registerKeybindings();
         
-        // Handles RenderTickCounter correctly
+        // Robust HUD rendering callback
         HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client.player != null && !client.options.hudHidden) {
-                float delta = tickCounter.getTickDelta(false);
-                hudRenderer.render(drawContext, delta);
+            try {
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client.player != null && !client.options.hudHidden) {
+                    float delta = tickCounter.getTickDelta(false);
+                    hudRenderer.render(drawContext, delta);
+                }
+            } catch (Exception e) {
+                // Prevent rendering crashes
             }
         });
         
@@ -58,48 +64,85 @@ public class LightCraftClient implements ClientModInitializer {
     }
     
     private void registerKeybindings() {
-        // CHANGED: Using the simpler 3-argument constructor to prevent NoSuchMethodError crash
-        toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.toggle_hud", 
-            GLFW.GLFW_KEY_H, 
-            "lightcraft.key.category"
-        ));
-        
-        toggleMinimapKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.toggle_minimap", 
-            GLFW.GLFW_KEY_M, 
-            "lightcraft.key.category"
-        ));
-        
-        openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.open_config", 
-            GLFW.GLFW_KEY_K, 
-            "lightcraft.key.category"
-        ));
-        
-        addWaypointKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.add_waypoint", 
-            GLFW.GLFW_KEY_B, 
-            "lightcraft.key.category"
-        ));
+        // Use reflection to register keys to avoid 1.21.1 vs 1.21.11 constructor mismatches
+        toggleHudKey = registerSafe("lightcraft.key.toggle_hud", GLFW.GLFW_KEY_H);
+        toggleMinimapKey = registerSafe("lightcraft.key.toggle_minimap", GLFW.GLFW_KEY_M);
+        openConfigKey = registerSafe("lightcraft.key.open_config", GLFW.GLFW_KEY_K);
+        addWaypointKey = registerSafe("lightcraft.key.add_waypoint", GLFW.GLFW_KEY_B);
+    }
+
+    private KeyBinding registerSafe(String name, int code) {
+        KeyBinding key = createKeyBinding(name, code, "lightcraft.key.category");
+        if (key != null) {
+            try {
+                return KeyBindingHelper.registerKeyBinding(key);
+            } catch (Exception e) {
+                LOGGER.error("Failed to register keybinding helper for " + name, e);
+            }
+        }
+        return null;
+    }
+
+    private KeyBinding createKeyBinding(String name, int code, String category) {
+        // 1. Try Standard Constructor (1.21.x standard)
+        try {
+            return new KeyBinding(name, InputUtil.Type.KEYSYM, code, category);
+        } catch (Throwable t1) {
+            // 2. Try Legacy Constructor
+            try {
+                return new KeyBinding(name, code, category);
+            } catch (Throwable t2) {
+                // 3. Mounts of Mayhem / Unknown Version Fallback via Reflection
+                LOGGER.warn("Standard KeyBinding failed, attempting reflection for 1.21.11 compatibility...");
+                try {
+                    for (Constructor<?> c : KeyBinding.class.getConstructors()) {
+                        Class<?>[] types = c.getParameterTypes();
+                        
+                        // Look for (String, int, String)
+                        if (types.length == 3 && types[0] == String.class && types[1] == int.class && types[2] == String.class) {
+                            return (KeyBinding) c.newInstance(name, code, category);
+                        }
+                        // Look for (String, InputUtil.Type, int, String)
+                        if (types.length == 4 && types[0] == String.class && types[1] == InputUtil.Type.class) {
+                            return (KeyBinding) c.newInstance(name, InputUtil.Type.KEYSYM, code, category);
+                        }
+                    }
+                } catch (Throwable t3) {
+                    LOGGER.error("CRITICAL: Could not create KeyBinding for " + name, t3);
+                }
+            }
+        }
+        return null;
     }
     
     private void onClientTick(MinecraftClient client) {
         if (client.player == null) return;
         
-        while (toggleHudKey.wasPressed()) {
-            config.hudEnabled = !config.hudEnabled;
-            configManager.saveConfig(config);
+        // Null checks prevent crash if registration failed
+        if (toggleHudKey != null && toggleHudKey.wasPressed()) {
+            while (toggleHudKey.wasPressed()) { // Clear buffer
+                config.hudEnabled = !config.hudEnabled;
+                configManager.saveConfig(config);
+            }
         }
-        while (toggleMinimapKey.wasPressed()) {
-            config.minimapEnabled = !config.minimapEnabled;
-            configManager.saveConfig(config);
+        
+        if (toggleMinimapKey != null && toggleMinimapKey.wasPressed()) {
+            while (toggleMinimapKey.wasPressed()) {
+                config.minimapEnabled = !config.minimapEnabled;
+                configManager.saveConfig(config);
+            }
         }
-        while (openConfigKey.wasPressed()) {
-            client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer));
+        
+        if (openConfigKey != null && openConfigKey.wasPressed()) {
+            while (openConfigKey.wasPressed()) {
+                client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer));
+            }
         }
-        while (addWaypointKey.wasPressed()) {
-            client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true));
+        
+        if (addWaypointKey != null && addWaypointKey.wasPressed()) {
+            while (addWaypointKey.wasPressed()) {
+                client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true));
+            }
         }
         
         hudRenderer.tick();
