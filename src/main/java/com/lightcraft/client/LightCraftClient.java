@@ -35,6 +35,9 @@ public class LightCraftClient implements ClientModInitializer {
     private KeyBinding openConfigKey;
     private KeyBinding addWaypointKey;
     
+    // Manual Input State
+    private final boolean[] keyStates = new boolean[512];
+    
     @Override
     public void onInitializeClient() {
         instance = this;
@@ -64,7 +67,7 @@ public class LightCraftClient implements ClientModInitializer {
     }
     
     private void registerKeybindings() {
-        // Use reflection to register keys to avoid 1.21.1 vs 1.21.11 constructor mismatches
+        // Attempt registration (might fail on 1.21.11, but we have a fallback now)
         toggleHudKey = registerSafe("lightcraft.key.toggle_hud", GLFW.GLFW_KEY_H);
         toggleMinimapKey = registerSafe("lightcraft.key.toggle_minimap", GLFW.GLFW_KEY_M);
         openConfigKey = registerSafe("lightcraft.key.open_config", GLFW.GLFW_KEY_K);
@@ -77,75 +80,78 @@ public class LightCraftClient implements ClientModInitializer {
             try {
                 return KeyBindingHelper.registerKeyBinding(key);
             } catch (Exception e) {
-                LOGGER.error("Failed to register keybinding helper for " + name, e);
+                LOGGER.error("Failed to register keybinding helper for " + name);
             }
         }
         return null;
     }
 
     private KeyBinding createKeyBinding(String name, int code, String category) {
-        // 1. Try Standard Constructor (1.21.x standard)
         try {
             return new KeyBinding(name, InputUtil.Type.KEYSYM, code, category);
         } catch (Throwable t1) {
-            // 2. Try Legacy Constructor
             try {
                 return new KeyBinding(name, code, category);
             } catch (Throwable t2) {
-                // 3. Mounts of Mayhem / Unknown Version Fallback via Reflection
-                LOGGER.warn("Standard KeyBinding failed, attempting reflection for 1.21.11 compatibility...");
-                try {
-                    for (Constructor<?> c : KeyBinding.class.getConstructors()) {
-                        Class<?>[] types = c.getParameterTypes();
-                        
-                        // Look for (String, int, String)
-                        if (types.length == 3 && types[0] == String.class && types[1] == int.class && types[2] == String.class) {
-                            return (KeyBinding) c.newInstance(name, code, category);
-                        }
-                        // Look for (String, InputUtil.Type, int, String)
-                        if (types.length == 4 && types[0] == String.class && types[1] == InputUtil.Type.class) {
-                            return (KeyBinding) c.newInstance(name, InputUtil.Type.KEYSYM, code, category);
-                        }
-                    }
-                } catch (Throwable t3) {
-                    LOGGER.error("CRITICAL: Could not create KeyBinding for " + name, t3);
-                }
+                // Reflection attempts... but if these fail, we fall back to manual input
+                return null;
             }
         }
-        return null;
     }
     
     private void onClientTick(MinecraftClient client) {
         if (client.player == null) return;
         
-        // Null checks prevent crash if registration failed
-        if (toggleHudKey != null && toggleHudKey.wasPressed()) {
-            while (toggleHudKey.wasPressed()) { // Clear buffer
-                config.hudEnabled = !config.hudEnabled;
-                configManager.saveConfig(config);
-            }
-        }
-        
-        if (toggleMinimapKey != null && toggleMinimapKey.wasPressed()) {
-            while (toggleMinimapKey.wasPressed()) {
-                config.minimapEnabled = !config.minimapEnabled;
-                configManager.saveConfig(config);
-            }
-        }
-        
-        if (openConfigKey != null && openConfigKey.wasPressed()) {
-            while (openConfigKey.wasPressed()) {
-                client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer));
-            }
-        }
-        
-        if (addWaypointKey != null && addWaypointKey.wasPressed()) {
-            while (addWaypointKey.wasPressed()) {
-                client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true));
-            }
+        // 1. Try Standard KeyBindings (if registration worked)
+        if (toggleHudKey != null) {
+            while (toggleHudKey.wasPressed()) { toggleHud(); }
+            while (toggleMinimapKey.wasPressed()) { toggleMinimap(); }
+            while (openConfigKey.wasPressed()) { openConfig(client); }
+            while (addWaypointKey.wasPressed()) { addWaypoint(client); }
+        } 
+        // 2. Fallback: Manual Input (Direct GLFW check)
+        else {
+            long handle = client.getWindow().getHandle();
+            
+            if (checkManualKey(handle, GLFW.GLFW_KEY_H)) toggleHud();
+            if (checkManualKey(handle, GLFW.GLFW_KEY_M)) toggleMinimap();
+            if (checkManualKey(handle, GLFW.GLFW_KEY_K)) openConfig(client);
+            if (checkManualKey(handle, GLFW.GLFW_KEY_B)) addWaypoint(client);
         }
         
         hudRenderer.tick();
+    }
+    
+    // --- Manual Input Helper ---
+    private boolean checkManualKey(long handle, int key) {
+        // Returns true only on the "rising edge" (the moment it is pressed)
+        boolean isDown = GLFW.glfwGetKey(handle, key) == GLFW.GLFW_PRESS;
+        boolean wasDown = keyStates[key];
+        keyStates[key] = isDown;
+        return isDown && !wasDown;
+    }
+
+    // --- Actions ---
+    private void toggleHud() {
+        config.hudEnabled = !config.hudEnabled;
+        configManager.saveConfig(config);
+        LOGGER.info("HUD Toggled");
+    }
+    
+    private void toggleMinimap() {
+        config.minimapEnabled = !config.minimapEnabled;
+        configManager.saveConfig(config);
+    }
+    
+    private void openConfig(MinecraftClient client) {
+        // Run on next tick to avoid input conflict
+        client.execute(() -> 
+            client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer)));
+    }
+    
+    private void addWaypoint(MinecraftClient client) {
+        client.execute(() -> 
+            client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true)));
     }
     
     public static LightCraftClient getInstance() { return instance; }
