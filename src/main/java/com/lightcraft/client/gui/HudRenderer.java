@@ -4,10 +4,11 @@ import com.lightcraft.client.hud.*;
 import com.lightcraft.client.minimap.WaypointManager;
 import com.lightcraft.config.ModConfig;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
-import java.lang.reflect.Method;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 public class HudRenderer {
     private final ModConfig config;
@@ -16,11 +17,10 @@ public class HudRenderer {
     private final MinimapHud minimapHud;
     private boolean editMode = false;
     
-    // Cache the accessor to avoid performance hit
-    private static Method cachedMatrixMethod = null;
-    private static Field cachedMatrixField = null;
-    private static boolean reflectionFailed = false;
-    
+    // Reflection Cache
+    private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod;
+    private static Field matrixField;
+
     public HudRenderer(ModConfig config, WaypointManager waypointManager) {
         this.config = config;
         this.fpsHud = new FpsHud(config);
@@ -34,9 +34,7 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        // Safely get matrices via reflection to bypass version mismatches
         MatrixStack matrices = getMatricesSafe(context);
-        
         if (matrices != null) {
             matrices.push();
             matrices.scale(config.hudScale, config.hudScale, 1.0f);
@@ -51,11 +49,11 @@ public class HudRenderer {
             if (config.minimapEnabled) minimapHud.render(context, sW, sH, tickDelta);
             
             if (editMode) {
-                 context.drawBorder(config.fpsX-2, config.fpsY-2, 60, 16, 0x80FFFFFF);
-                 context.drawBorder(config.coordsX-2, config.coordsY-2, 150, 40, 0x80FFFFFF);
+                 drawBorderSafe(context, config.fpsX-2, config.fpsY-2, 60, 16, 0x80FFFFFF);
+                 drawBorderSafe(context, config.coordsX-2, config.coordsY-2, 150, 40, 0x80FFFFFF);
             }
         } catch (Exception e) {
-            // Suppress rendering errors to prevent crash
+            // Prevent crash loop
         }
         
         if (matrices != null) {
@@ -63,40 +61,99 @@ public class HudRenderer {
         }
     }
     
-    private MatrixStack getMatricesSafe(DrawContext context) {
-        if (reflectionFailed) return null;
+    // --- Safe Reflection Methods ---
 
+    public static void drawTextSafe(DrawContext context, TextRenderer tr, String text, int x, int y, int color, boolean shadow) {
         try {
-            // 1. Try Cached Method
-            if (cachedMatrixMethod != null) {
-                return (MatrixStack) cachedMatrixMethod.invoke(context);
+            if (drawTextMethod == null) {
+                for (Method m : DrawContext.class.getMethods()) {
+                    // Look for (TextRenderer, String, int, int, int, boolean)
+                    if (m.getParameterCount() == 6 && m.getParameterTypes()[1] == String.class && m.getParameterTypes()[5] == boolean.class) {
+                        drawTextMethod = m; break;
+                    }
+                }
             }
-            // 2. Try Cached Field
-            if (cachedMatrixField != null) {
-                return (MatrixStack) cachedMatrixField.get(context);
-            }
+            if (drawTextMethod != null) drawTextMethod.invoke(context, tr, text, x, y, color, shadow);
+        } catch (Exception e) {}
+    }
 
-            // 3. Initial Lookup: Search for a method returning MatrixStack
+    public static void fillSafe(DrawContext context, int x1, int y1, int x2, int y2, int color) {
+        try {
+            if (fillMethod == null) {
+                for (Method m : DrawContext.class.getMethods()) {
+                    // Look for (int, int, int, int, int)
+                    if (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class && m.getReturnType() == void.class) {
+                        // Ideally checking method name or other heuristics, but this signature is unique enough in DrawContext usually
+                        fillMethod = m; break;
+                    }
+                }
+            }
+            if (fillMethod != null) fillMethod.invoke(context, x1, y1, x2, y2, color);
+        } catch (Exception e) {}
+    }
+
+    public static void drawBorderSafe(DrawContext context, int x, int y, int w, int h, int color) {
+        try {
+            if (borderMethod == null) {
+                for (Method m : DrawContext.class.getMethods()) {
+                    if (m.getParameterCount() == 5 && m.getName().toLowerCase().contains("border")) {
+                        borderMethod = m; break;
+                    }
+                }
+            }
+            if (borderMethod != null) borderMethod.invoke(context, x, y, w, h, color);
+            else {
+                // Fallback implementation using fill
+                fillSafe(context, x, y, x + w, y + 1, color); // Top
+                fillSafe(context, x, y + h - 1, x + w, y + h, color); // Bottom
+                fillSafe(context, x, y + 1, x + 1, y + h - 1, color); // Left
+                fillSafe(context, x + w - 1, y + 1, x + w, y + h - 1, color); // Right
+            }
+        } catch (Exception e) {}
+    }
+
+    public static void enableScissorSafe(DrawContext context, int x1, int y1, int x2, int y2) {
+        try {
+            if (scissorOnMethod == null) {
+                for (Method m : DrawContext.class.getMethods()) {
+                    if (m.getParameterCount() == 4 && m.getName().toLowerCase().contains("scissor")) {
+                        scissorOnMethod = m; break;
+                    }
+                }
+            }
+            if (scissorOnMethod != null) scissorOnMethod.invoke(context, x1, y1, x2, y2);
+        } catch (Exception e) {}
+    }
+
+    public static void disableScissorSafe(DrawContext context) {
+        try {
+            if (scissorOffMethod == null) {
+                for (Method m : DrawContext.class.getMethods()) {
+                    if (m.getParameterCount() == 0 && m.getName().toLowerCase().contains("scissor")) {
+                        scissorOffMethod = m; break;
+                    }
+                }
+            }
+            if (scissorOffMethod != null) scissorOffMethod.invoke(context);
+        } catch (Exception e) {}
+    }
+
+    private MatrixStack getMatricesSafe(DrawContext context) {
+        try {
+            if (matrixMethod != null) return (MatrixStack) matrixMethod.invoke(context);
+            if (matrixField != null) return (MatrixStack) matrixField.get(context);
+
             for (Method m : DrawContext.class.getMethods()) {
                 if (m.getReturnType() == MatrixStack.class && m.getParameterCount() == 0) {
-                    cachedMatrixMethod = m;
-                    return (MatrixStack) m.invoke(context);
+                    matrixMethod = m; return (MatrixStack) m.invoke(context);
                 }
             }
-            
-            // 4. Fallback: Search for a field of type MatrixStack
             for (Field f : DrawContext.class.getDeclaredFields()) {
                 if (f.getType() == MatrixStack.class) {
-                    f.setAccessible(true);
-                    cachedMatrixField = f;
-                    return (MatrixStack) f.get(context);
+                    f.setAccessible(true); matrixField = f; return (MatrixStack) f.get(context);
                 }
             }
-            
-        } catch (Exception e) {
-            reflectionFailed = true; // Stop trying if it fails significantly
-        }
-        
+        } catch (Exception e) {}
         return null;
     }
     
