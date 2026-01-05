@@ -49,8 +49,8 @@ public class HudRenderer {
             if (config.minimapEnabled) minimapHud.render(context, sW, sH, tickDelta);
             
             if (editMode) {
-                 drawBorderSafe(context, config.fpsX-2, config.fpsY-2, 60, 16, 0x80FFFFFF);
-                 drawBorderSafe(context, config.coordsX-2, config.coordsY-2, 150, 40, 0x80FFFFFF);
+                 drawBorderSafe(context, config.fpsX-2, config.fpsY-2, 60, 16, 0xFFFFFFFF);
+                 drawBorderSafe(context, config.coordsX-2, config.coordsY-2, 150, 40, 0xFFFFFFFF);
             }
         } catch (Exception e) {
             // Prevent crash loop
@@ -67,8 +67,9 @@ public class HudRenderer {
         try {
             if (drawTextMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    // Look for (TextRenderer, String, int, int, int, boolean)
-                    if (m.getParameterCount() == 6 && m.getParameterTypes()[1] == String.class && m.getParameterTypes()[5] == boolean.class) {
+                    // Try to match "drawText" or Intermediary "method_25303"
+                    if (m.getName().equals("drawText") || m.getName().equals("method_25303") || 
+                       (m.getParameterCount() == 6 && m.getParameterTypes()[1] == String.class && m.getParameterTypes()[5] == boolean.class)) {
                         drawTextMethod = m; break;
                     }
                 }
@@ -81,9 +82,9 @@ public class HudRenderer {
         try {
             if (fillMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    // Look for (int, int, int, int, int)
-                    if (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class && m.getReturnType() == void.class) {
-                        // Ideally checking method name or other heuristics, but this signature is unique enough in DrawContext usually
+                    // Try to match "fill" or Intermediary "method_25294"
+                    if (m.getName().equals("fill") || m.getName().equals("method_25294") ||
+                       (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class && m.getReturnType() == void.class && m.getName().length() < 10)) {
                         fillMethod = m; break;
                     }
                 }
@@ -96,18 +97,19 @@ public class HudRenderer {
         try {
             if (borderMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    if (m.getParameterCount() == 5 && m.getName().toLowerCase().contains("border")) {
+                    if (m.getName().equals("drawBorder") || m.getName().equals("method_51448") ||
+                        (m.getParameterCount() == 5 && m.getName().toLowerCase().contains("border"))) {
                         borderMethod = m; break;
                     }
                 }
             }
             if (borderMethod != null) borderMethod.invoke(context, x, y, w, h, color);
             else {
-                // Fallback implementation using fill
-                fillSafe(context, x, y, x + w, y + 1, color); // Top
-                fillSafe(context, x, y + h - 1, x + w, y + h, color); // Bottom
-                fillSafe(context, x, y + 1, x + 1, y + h - 1, color); // Left
-                fillSafe(context, x + w - 1, y + 1, x + w, y + h - 1, color); // Right
+                // Manual fallback if method not found
+                fillSafe(context, x, y, x + w, y + 1, color);
+                fillSafe(context, x, y + h - 1, x + w, y + h, color);
+                fillSafe(context, x, y + 1, x + 1, y + h - 1, color);
+                fillSafe(context, x + w - 1, y + 1, x + w, y + h - 1, color);
             }
         } catch (Exception e) {}
     }
@@ -116,7 +118,8 @@ public class HudRenderer {
         try {
             if (scissorOnMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    if (m.getParameterCount() == 4 && m.getName().toLowerCase().contains("scissor")) {
+                    if (m.getName().equals("enableScissor") || m.getName().equals("method_25298") ||
+                       (m.getParameterCount() == 4 && m.getName().toLowerCase().contains("scissor"))) {
                         scissorOnMethod = m; break;
                     }
                 }
@@ -129,7 +132,8 @@ public class HudRenderer {
         try {
             if (scissorOffMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    if (m.getParameterCount() == 0 && m.getName().toLowerCase().contains("scissor")) {
+                    if (m.getName().equals("disableScissor") || m.getName().equals("method_25299") ||
+                       (m.getParameterCount() == 0 && m.getName().toLowerCase().contains("scissor"))) {
                         scissorOffMethod = m; break;
                     }
                 }
@@ -144,10 +148,11 @@ public class HudRenderer {
             if (matrixField != null) return (MatrixStack) matrixField.get(context);
 
             for (Method m : DrawContext.class.getMethods()) {
-                if (m.getReturnType() == MatrixStack.class && m.getParameterCount() == 0) {
+                if ((m.getName().equals("getMatrices") || m.getName().equals("method_51446")) && m.getParameterCount() == 0) {
                     matrixMethod = m; return (MatrixStack) m.invoke(context);
                 }
             }
+            // Fallback field search
             for (Field f : DrawContext.class.getDeclaredFields()) {
                 if (f.getType() == MatrixStack.class) {
                     f.setAccessible(true); matrixField = f; return (MatrixStack) f.get(context);
