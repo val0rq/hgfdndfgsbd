@@ -15,15 +15,8 @@ repositories {
     maven { url "https://maven.fabricmc.net/" }
 }
 
-loom {
-    splitEnvironmentSourceSets()
-    mods {
-        "lightcraft" {
-            sourceSet sourceSets.main
-            sourceSet sourceSets.client
-        }
-    }
-}
+// REMOVED the "splitEnvironmentSourceSets" block here.
+// This allows your main folder to access Client code properly.
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
