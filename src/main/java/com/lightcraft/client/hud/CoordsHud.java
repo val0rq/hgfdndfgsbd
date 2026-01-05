@@ -1,5 +1,6 @@
 package com.lightcraft.client.hud;
 import com.lightcraft.config.ModConfig;
+import com.lightcraft.client.gui.HudRenderer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.entity.player.PlayerEntity;
@@ -15,14 +16,14 @@ public class CoordsHud {
         
         int x = config.coordsX;
         int y = config.coordsY;
-        context.fill(x - 2, y - 2, x + 150, y + (config.showDirection ? 24 : 12), 0x80000000);
+        HudRenderer.fillSafe(context, x - 2, y - 2, x + 150, y + (config.showDirection ? 24 : 12), 0x80000000);
         
         String coords = String.format("XYZ: %.1f / %.1f / %.1f", player.getX(), player.getY(), player.getZ());
-        context.drawText(MinecraftClient.getInstance().textRenderer, coords, x, y, 0xFFFFFFFF, true);
+        HudRenderer.drawTextSafe(context, MinecraftClient.getInstance().textRenderer, coords, x, y, 0xFFFFFFFF, true);
         
         if (config.showDirection) {
             String dir = getDirection(player.getYaw());
-            context.drawText(MinecraftClient.getInstance().textRenderer, "Facing: " + dir, x, y + 11, 0xFFAAAAAA, true);
+            HudRenderer.drawTextSafe(context, MinecraftClient.getInstance().textRenderer, "Facing: " + dir, x, y + 11, 0xFFAAAAAA, true);
         }
     }
     
