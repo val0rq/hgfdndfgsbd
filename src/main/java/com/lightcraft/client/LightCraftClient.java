@@ -13,7 +13,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
-import net.minecraft.client.render.RenderTickCounter; // Added import
+import net.minecraft.client.render.RenderTickCounter;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,11 +45,10 @@ public class LightCraftClient implements ClientModInitializer {
         
         registerKeybindings();
         
-        // FIXED: Handles RenderTickCounter correctly
+        // Handles RenderTickCounter correctly
         HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player != null && !client.options.hudHidden) {
-                // Extract the float delta value from the counter
                 float delta = tickCounter.getTickDelta(false);
                 hudRenderer.render(drawContext, delta);
             }
@@ -59,14 +58,30 @@ public class LightCraftClient implements ClientModInitializer {
     }
     
     private void registerKeybindings() {
+        // CHANGED: Using the simpler 3-argument constructor to prevent NoSuchMethodError crash
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.toggle_hud", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_H, "lightcraft.key.category"));
+            "lightcraft.key.toggle_hud", 
+            GLFW.GLFW_KEY_H, 
+            "lightcraft.key.category"
+        ));
+        
         toggleMinimapKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.toggle_minimap", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_M, "lightcraft.key.category"));
+            "lightcraft.key.toggle_minimap", 
+            GLFW.GLFW_KEY_M, 
+            "lightcraft.key.category"
+        ));
+        
         openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.open_config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_K, "lightcraft.key.category"));
+            "lightcraft.key.open_config", 
+            GLFW.GLFW_KEY_K, 
+            "lightcraft.key.category"
+        ));
+        
         addWaypointKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "lightcraft.key.add_waypoint", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_B, "lightcraft.key.category"));
+            "lightcraft.key.add_waypoint", 
+            GLFW.GLFW_KEY_B, 
+            "lightcraft.key.category"
+        ));
     }
     
     private void onClientTick(MinecraftClient client) {
