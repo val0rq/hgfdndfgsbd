@@ -52,7 +52,9 @@ public class ConfigScreen extends Screen {
     @Override
     public void render(DrawContext c, int mx, int my, float d) {
         renderBackground(c, mx, my, d);
-        c.drawCenteredTextWithShadow(textRenderer, title, width/2, 20, 0xFFFFFF);
+        // Safe Text Rendering
+        int titleWidth = textRenderer.getWidth(title);
+        HudRenderer.drawTextSafe(c, textRenderer, title.getString(), width/2 - titleWidth/2, 20, 0xFFFFFFFF, true);
         super.render(c, mx, my, d);
     }
 }
