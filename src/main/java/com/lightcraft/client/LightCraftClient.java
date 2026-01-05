@@ -13,6 +13,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.client.render.RenderTickCounter; // Added import
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,10 +45,13 @@ public class LightCraftClient implements ClientModInitializer {
         
         registerKeybindings();
         
-        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
+        // FIXED: Handles RenderTickCounter correctly
+        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player != null && !client.options.hudHidden) {
-                hudRenderer.render(drawContext, tickDelta);
+                // Extract the float delta value from the counter
+                float delta = tickCounter.getTickDelta(false);
+                hudRenderer.render(drawContext, delta);
             }
         });
         
