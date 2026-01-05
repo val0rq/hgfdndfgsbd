@@ -3,27 +3,21 @@
   "id": "lightcraft",
   "version": "${version}",
   "name": "LightCraft",
-  "description": "Lightweight Utility Mod",
-  "authors": [
-    "LightCraft"
-  ],
+  "description": "Lightweight Utility Mod for Mounts of Mayhem",
+  "authors": ["LightCraft Team"],
   "contact": {
-    "sources": "https://github.com/example/lightcraft"
+    "sources": "https://github.com/lightcraft/lightcraft-mod"
   },
   "license": "MIT",
   "icon": "assets/lightcraft/icon.png",
   "environment": "client",
   "entrypoints": {
-    "client": [
-      "com.lightcraft.client.LightCraftClient"
-    ]
+    "client": ["com.lightcraft.client.LightCraftClient"]
   },
-  "mixins": [
-    "lightcraft.mixins.json"
-  ],
+  "mixins": ["lightcraft.mixins.json"],
   "depends": {
     "fabricloader": ">=0.16.9",
-    "minecraft": "~1.21.1",
+    "minecraft": ">=1.21", 
     "java": ">=21",
     "fabric-api": "*"
   }
