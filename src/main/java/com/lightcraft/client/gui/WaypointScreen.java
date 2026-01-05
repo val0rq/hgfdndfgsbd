@@ -32,12 +32,22 @@ public class WaypointScreen extends Screen {
             manager.addWaypoint(nameField.getText(), pos, selectedColor, d);
             close();
         }).dimensions(x, 100, 200, 20).build());
+        
+        addDrawableChild(ButtonWidget.builder(Text.of("Cancel"), b -> close()).dimensions(x, 130, 200, 20).build());
     }
     
     @Override
     public void render(DrawContext c, int mx, int my, float d) {
         renderBackground(c, mx, my, d);
-        c.drawCenteredTextWithShadow(textRenderer, title, width/2, 20, 0xFFFFFF);
+        // Safe drawing
+        String titleStr = title.getString();
+        int titleW = textRenderer.getWidth(titleStr);
+        HudRenderer.drawTextSafe(c, textRenderer, titleStr, width/2 - titleW/2, 20, 0xFFFFFFFF, true);
+        
+        String coords = pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
+        int coordsW = textRenderer.getWidth(coords);
+        HudRenderer.drawTextSafe(c, textRenderer, coords, width/2 - coordsW/2, 45, 0xFFAAAAAA, true);
+        
         super.render(c, mx, my, d);
     }
     
