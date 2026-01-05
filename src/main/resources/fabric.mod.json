@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "lightcraft",
+  "version": "${version}",
+  "name": "LightCraft",
+  "description": "Lightweight Utility Mod",
+  "authors": [
+    "LightCraft"
+  ],
+  "contact": {
+    "sources": "https://github.com/example/lightcraft"
+  },
+  "license": "MIT",
+  "icon": "assets/lightcraft/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.lightcraft.client.LightCraftClient"
+    ]
+  },
+  "mixins": [
+    "lightcraft.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.9",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
