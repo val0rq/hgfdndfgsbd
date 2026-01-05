@@ -17,7 +17,6 @@ public class HudRenderer {
     private final MinimapHud minimapHud;
     private boolean editMode = false;
     
-    // Reflection Cache
     private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod;
     private static Field matrixField;
 
@@ -53,7 +52,6 @@ public class HudRenderer {
                  drawBorderSafe(context, config.coordsX-2, config.coordsY-2, 150, 40, 0xFFFFFFFF);
             }
         } catch (Exception e) {
-            // Prevent crash loop
         }
         
         if (matrices != null) {
@@ -67,7 +65,6 @@ public class HudRenderer {
         try {
             if (drawTextMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    // Try to match "drawText" or Intermediary "method_25303"
                     if (m.getName().equals("drawText") || m.getName().equals("method_25303") || 
                        (m.getParameterCount() == 6 && m.getParameterTypes()[1] == String.class && m.getParameterTypes()[5] == boolean.class)) {
                         drawTextMethod = m; break;
@@ -82,7 +79,6 @@ public class HudRenderer {
         try {
             if (fillMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    // Try to match "fill" or Intermediary "method_25294"
                     if (m.getName().equals("fill") || m.getName().equals("method_25294") ||
                        (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class && m.getReturnType() == void.class && m.getName().length() < 10)) {
                         fillMethod = m; break;
@@ -105,7 +101,6 @@ public class HudRenderer {
             }
             if (borderMethod != null) borderMethod.invoke(context, x, y, w, h, color);
             else {
-                // Manual fallback if method not found
                 fillSafe(context, x, y, x + w, y + 1, color);
                 fillSafe(context, x, y + h - 1, x + w, y + h, color);
                 fillSafe(context, x, y + 1, x + 1, y + h - 1, color);
@@ -142,7 +137,8 @@ public class HudRenderer {
         } catch (Exception e) {}
     }
 
-    private MatrixStack getMatricesSafe(DrawContext context) {
+    // UPDATED: Now public static so MinimapHud can use it
+    public static MatrixStack getMatricesSafe(DrawContext context) {
         try {
             if (matrixMethod != null) return (MatrixStack) matrixMethod.invoke(context);
             if (matrixField != null) return (MatrixStack) matrixField.get(context);
@@ -152,7 +148,6 @@ public class HudRenderer {
                     matrixMethod = m; return (MatrixStack) m.invoke(context);
                 }
             }
-            // Fallback field search
             for (Field f : DrawContext.class.getDeclaredFields()) {
                 if (f.getType() == MatrixStack.class) {
                     f.setAccessible(true); matrixField = f; return (MatrixStack) f.get(context);
