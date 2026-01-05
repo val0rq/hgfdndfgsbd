@@ -16,6 +16,7 @@ public class ModConfig {
     public int coordsY = 20;
     public boolean showDirection = true;
     
+    // Minimap Settings
     public boolean minimapEnabled = true;
     public int minimapX = -110;
     public int minimapY = 10;
@@ -24,6 +25,7 @@ public class ModConfig {
     public boolean minimapRotate = true;
     public boolean minimapShowEntities = true;
     public boolean minimapCircular = true;
+    public int minimapBorderColor = 0xFF555555; // Added the missing field here
     
     public List<Waypoint> waypoints = new ArrayList<>();
     public boolean hudEditorGridSnap = true;
