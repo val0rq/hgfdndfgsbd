@@ -51,8 +51,9 @@ public class ConfigScreen extends Screen {
     
     @Override
     public void render(DrawContext c, int mx, int my, float d) {
-        renderBackground(c, mx, my, d);
-        // Safe Text Rendering
+        // FIXED: Use simple dark background instead of renderBackground to avoid blur crash
+        HudRenderer.fillSafe(c, 0, 0, width, height, 0xC0000000);
+        
         int titleWidth = textRenderer.getWidth(title);
         HudRenderer.drawTextSafe(c, textRenderer, title.getString(), width/2 - titleWidth/2, 20, 0xFFFFFFFF, true);
         super.render(c, mx, my, d);
