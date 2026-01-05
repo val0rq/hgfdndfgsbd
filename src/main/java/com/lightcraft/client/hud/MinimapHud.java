@@ -32,14 +32,11 @@ public class MinimapHud {
         int x = config.minimapX < 0 ? w + config.minimapX : config.minimapX;
         int y = config.minimapY;
         
-        // Draw Border & Background
-        HudRenderer.fillSafe(context, x - 1, y - 1, x + size + 1, y + size + 1, config.minimapBorderColor);
-        HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF000000);
-        
+        // Draw Background
+        HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF222222);
+        HudRenderer.drawBorderSafe(context, x-1, y-1, size+2, size+2, config.minimapBorderColor);
         HudRenderer.enableScissorSafe(context, x, y, x+size, y+size);
         
-        // Draw Terrain
-        int radius = size / 2 / config.minimapZoom;
         int cx = x + size/2;
         int cy = y + size/2;
         int px = (int) player.getX();
@@ -47,16 +44,21 @@ public class MinimapHud {
         int pz = (int) player.getZ();
         float yaw = player.getYaw();
         
+        // OPTIMIZATION: Step size 2 increases FPS significantly
+        int step = 2; 
+        int zoom = Math.max(1, config.minimapZoom);
+        int radius = (size / 2) / zoom;
+        
         BlockPos.Mutable pos = new BlockPos.Mutable();
         
-        // Scan area
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
+        // Terrain Loop
+        for (int dx = -radius; dx <= radius; dx += step) {
+            for (int dz = -radius; dz <= radius; dz += step) {
                 int worldX = px + dx;
                 int worldZ = pz + dz;
                 
-                // Find top block
-                int color = 0xFF222222; // default
+                int color = 0xFF222222; 
+                // Simple height check
                 for (int hY = py + 10; hY > world.getBottomY(); hY--) {
                     pos.set(worldX, hY, worldZ);
                     BlockState state = world.getBlockState(pos);
@@ -64,17 +66,13 @@ public class MinimapHud {
                         MapColor mapColor = state.getMapColor(world, pos);
                         if (mapColor != null) {
                             color = mapColor.color | 0xFF000000;
-                            // Simple height shading
-                            if (hY > py) color = brighten(color, 20);
-                            if (hY < py) color = darken(color, 20);
                         }
                         break;
                     }
                 }
                 
-                // Project to map
-                int mapX = dx * config.minimapZoom;
-                int mapZ = dz * config.minimapZoom;
+                int mapX = dx * zoom;
+                int mapZ = dz * zoom;
                 
                 if (config.minimapRotate) {
                     float rad = (float) Math.toRadians(-yaw);
@@ -83,14 +81,11 @@ public class MinimapHud {
                     mapX = rx; mapZ = rz;
                 }
                 
-                // Draw pixel (zoomed)
                 int pixelX = cx + mapX;
                 int pixelY = cy + mapZ;
-                int zoom = config.minimapZoom;
                 
-                if (pixelX >= x && pixelX < x + size && pixelY >= y && pixelY < y + size) {
-                    HudRenderer.fillSafe(context, pixelX, pixelY, pixelX + zoom, pixelY + zoom, color);
-                }
+                // Draw 2x2 blocks for speed
+                HudRenderer.fillSafe(context, pixelX, pixelY, pixelX + step*zoom, pixelY + step*zoom, color);
             }
         }
         
@@ -98,8 +93,8 @@ public class MinimapHud {
         if (config.minimapShowEntities) {
             for (Entity e : client.world.getEntities()) {
                 if (e == player) continue;
-                double edx = (e.getX() - player.getX()) * config.minimapZoom;
-                double edz = (e.getZ() - player.getZ()) * config.minimapZoom;
+                double edx = (e.getX() - player.getX()) * zoom;
+                double edz = (e.getZ() - player.getZ()) * zoom;
                 
                 if (config.minimapRotate) {
                     float rad = (float) Math.toRadians(-yaw);
@@ -111,36 +106,16 @@ public class MinimapHud {
                 int ex = cx + (int)edx;
                 int ey = cy + (int)edz;
                 
+                // Only draw if within bounds
                 if (ex > x && ex < x + size && ey > y && ey < y + size) {
-                    int entColor = 0xFFFF0000; // Red for mobs
-                    if (e instanceof PlayerEntity) entColor = 0xFFFFFFFF; // White for players
-                    HudRenderer.fillSafe(context, ex - 1, ey - 1, ex + 2, ey + 2, entColor);
+                    int entColor = (e instanceof PlayerEntity) ? 0xFFFFFFFF : 0xFFFF0000;
+                    HudRenderer.fillSafe(context, ex - 1, ey - 1, ex + 1, ey + 1, entColor);
                 }
             }
         }
         
-        // Player Arrow (Center)
-        HudRenderer.fillSafe(context, cx - 1, cy - 2, cx + 2, cy + 2, 0xFF00FF00); // Green arrow
-        
+        // Player Arrow
+        HudRenderer.fillSafe(context, cx - 1, cy - 2, cx + 2, cy + 2, 0xFF00FF00);
         HudRenderer.disableScissorSafe(context);
-        
-        // Cardinal Directions Overlay
-        if (!config.minimapRotate) {
-            HudRenderer.drawTextSafe(context, client.textRenderer, "N", cx - 2, y + 2, 0xFFFFFFFF, true);
-        }
-    }
-    
-    private int darken(int color, int amount) {
-        int r = Math.max(0, ((color >> 16) & 0xFF) - amount);
-        int g = Math.max(0, ((color >> 8) & 0xFF) - amount);
-        int b = Math.max(0, (color & 0xFF) - amount);
-        return 0xFF000000 | (r << 16) | (g << 8) | b;
-    }
-    
-    private int brighten(int color, int amount) {
-        int r = Math.min(255, ((color >> 16) & 0xFF) + amount);
-        int g = Math.min(255, ((color >> 8) & 0xFF) + amount);
-        int b = Math.min(255, (color & 0xFF) + amount);
-        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 }
