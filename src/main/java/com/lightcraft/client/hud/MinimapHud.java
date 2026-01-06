@@ -18,11 +18,9 @@ import net.minecraft.world.World;
 public class MinimapHud {
     private final ModConfig config;
     private final WaypointManager waypointManager;
-    
     private int[][] colorCache;
     private int lastPlayerX = Integer.MAX_VALUE;
     private int lastPlayerZ = Integer.MAX_VALUE;
-    private long lastUpdate = 0;
     
     public MinimapHud(ModConfig config, WaypointManager wm) {
         this.config = config;
@@ -36,19 +34,16 @@ public class MinimapHud {
         if (player == null || client.world == null) return;
         
         int size = config.minimapSize;
-        int halfSize = size / 2;
         int x = config.minimapX < 0 ? w + config.minimapX : config.minimapX;
         int y = config.minimapY;
-        int cx = x + halfSize;
-        int cy = y + halfSize;
         
-        // Update Data
         int px = (int) player.getX();
         int pz = (int) player.getZ();
         
-        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || System.currentTimeMillis() - lastUpdate > 250) {
+        // Aggressive update to fix black screen
+        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0) {
             updateMapData(client.world, px, pz);
-            lastPlayerX = px; lastPlayerZ = pz; lastUpdate = System.currentTimeMillis();
+            lastPlayerX = px; lastPlayerZ = pz;
         }
 
         // Draw Border/BG
@@ -56,20 +51,19 @@ public class MinimapHud {
         HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF000000);
         HudRenderer.enableScissorSafe(context, x, y, x+size, y+size);
         
-        // Matrix Rotation
         MatrixStack matrices = HudRenderer.getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
-            matrices.translate(cx, cy, 0);
+            matrices.translate(x + size/2, y + size/2, 0);
             
             float angle = config.minimapRotate ? player.getYaw() + 180.0f : 180.0f;
             matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
             
             int zoom = Math.max(1, config.minimapZoom);
-            int renderRange = 60; // Cache limit
             
-            for (int rX = -renderRange; rX < renderRange; rX++) {
-                for (int rZ = -renderRange; rZ < renderRange; rZ++) {
+            // Draw Terrain
+            for (int rX = -40; rX < 40; rX++) {
+                for (int rZ = -40; rZ < 40; rZ++) {
                     int cX = rX + 64;
                     int cZ = rZ + 64;
                     if (cX >= 0 && cX < 128 && cZ >= 0 && cZ < 128) {
@@ -81,13 +75,23 @@ public class MinimapHud {
                 }
             }
             
+            // Waypoints on Minimap
+            for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
+                if (!wp.enabled) continue;
+                double dx = (wp.x - player.getX()) * zoom;
+                double dz = (wp.z - player.getZ()) * zoom;
+                if (Math.abs(dx) < size/2 && Math.abs(dz) < size/2) {
+                    HudRenderer.fillSafe(context, (int)dx - 2, (int)dz - 2, (int)dx + 2, (int)dz + 2, wp.color | 0xFF000000);
+                }
+            }
+
             // Entities
             if (config.minimapShowEntities) {
                 for (Entity e : client.world.getEntities()) {
                     if (e == player) continue;
-                    double edx = (player.getX() - e.getX()) * zoom;
+                    double edx = (player.getX() - e.getX()) * zoom; // Inverted logic for rotation
                     double edz = (player.getZ() - e.getZ()) * zoom;
-                    if (Math.sqrt(edx*edx + edz*edz) < halfSize) {
+                    if (Math.abs(edx) < size/2 && Math.abs(edz) < size/2) {
                          HudRenderer.fillSafe(context, (int)edx - 1, (int)edz - 1, (int)edx + 1, (int)edz + 1, 0xFFFF0000);
                     }
                 }
@@ -95,51 +99,40 @@ public class MinimapHud {
             matrices.pop();
         }
         
-        HudRenderer.fillSafe(context, cx - 1, cy - 1, cx + 1, cy + 1, 0xFF00FF00); // Player
+        HudRenderer.fillSafe(context, x + size/2 - 1, y + size/2 - 1, x + size/2 + 1, y + size/2 + 1, 0xFF00FF00);
         HudRenderer.disableScissorSafe(context);
         
         if (!config.minimapRotate) {
-            HudRenderer.drawTextSafe(context, client.textRenderer, "N", cx - 2, y + 2, 0xFFFFFFFF, true);
+            HudRenderer.drawTextSafe(context, client.textRenderer, "N", x + size/2 - 2, y + 2, 0xFFFFFFFF, true);
         }
     }
     
     private void updateMapData(World world, int px, int pz) {
         BlockPos.Mutable pos = new BlockPos.Mutable();
-        int range = 64;
-        
-        for (int x = -range; x < range; x++) {
-            for (int z = -range; z < range; z++) {
+        for (int x = -64; x < 64; x++) {
+            for (int z = -64; z < 64; z++) {
                 int worldX = px + x;
                 int worldZ = pz + z;
                 
-                // Native surface height check - reliable!
-                int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING, worldX, worldZ);
+                // FIXED: Use WORLD_SURFACE to guarantee we hit ground/water
+                int surfaceY = world.getTopY(Heightmap.Type.WORLD_SURFACE, worldX, worldZ);
                 pos.set(worldX, surfaceY - 1, worldZ);
                 
                 BlockState state = world.getBlockState(pos);
                 MapColor mapColor = state.getMapColor(world, pos);
                 
-                if (mapColor != null) {
-                    int color = mapColor.color;
-                    
-                    // Fallback for weird 1.21 map colors if they return 0
-                    if (color == 0) {
-                        // FIXED: Replaced getMaterial().isLiquid() with getFluidState check
-                        if (!state.getFluidState().isEmpty()) color = 0x4040FF;
-                        else color = 0x7F7F7F; 
-                    }
-                    
-                    color = color | 0xFF000000; // Full alpha
-                    
-                    // Height shading
-                    int pY = (int) MinecraftClient.getInstance().player.getY();
-                    if (surfaceY < pY) color = darken(color, 30);
-                    if (surfaceY > pY) color = brighten(color, 30);
-                    
-                    colorCache[x + 64][z + 64] = color;
-                } else {
-                    colorCache[x + 64][z + 64] = 0xFF222222; // Fallback
-                }
+                int color = (mapColor != null) ? mapColor.color : 0x7F7F7F;
+                if (color == 0) color = 0x7F7F7F; // Fallback gray
+                
+                // Color override for water/lava if map color fails
+                if (!state.getFluidState().isEmpty()) color = 0x4040FF;
+                
+                // Height shading
+                int pY = (int) MinecraftClient.getInstance().player.getY();
+                if (surfaceY < pY) color = darken(color, 20);
+                if (surfaceY > pY) color = brighten(color, 20);
+                
+                colorCache[x + 64][z + 64] = color | 0xFF000000;
             }
         }
     }
