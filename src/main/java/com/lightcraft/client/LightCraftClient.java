@@ -27,32 +27,37 @@ public class LightCraftClient implements ClientModInitializer {
     
     private KeyBinding toggleHudKey, toggleMinimapKey, openConfigKey, addWaypointKey;
     private final boolean[] keyStates = new boolean[512];
-    
     private boolean wasDead = false;
     
     @Override
     public void onInitializeClient() {
         instance = this;
-        LOGGER.info("Initializing LightCraft Ultimate...");
+        LOGGER.info("Initializing LightCraft...");
         
-        configManager = new ConfigManager();
-        config = configManager.loadConfig();
-        waypointManager = new WaypointManager(configManager);
-        hudRenderer = new HudRenderer(config, waypointManager);
-        
-        registerKeybindings();
-        
-        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
-            try {
-                MinecraftClient client = MinecraftClient.getInstance();
-                if (client.player != null && !client.options.hudHidden) {
-                    float delta = tickCounter.getTickDelta(false);
-                    hudRenderer.render(drawContext, delta);
-                }
-            } catch (Exception e) {}
-        });
-        
-        ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
+        try {
+            configManager = new ConfigManager();
+            config = configManager.loadConfig();
+            waypointManager = new WaypointManager(configManager);
+            
+            // Safe HUD Init
+            hudRenderer = new HudRenderer(config, waypointManager);
+            
+            registerKeybindings();
+            
+            HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
+                try {
+                    MinecraftClient client = MinecraftClient.getInstance();
+                    if (client.player != null && !client.options.hudHidden) {
+                        float delta = tickCounter.getTickDelta(false);
+                        hudRenderer.render(drawContext, delta);
+                    }
+                } catch (Exception e) {}
+            });
+            
+            ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
+        } catch (Exception e) {
+            LOGGER.error("CRITICAL: Failed to init LightCraft. Mod disabled.", e);
+        }
     }
     
     private void registerKeybindings() {
@@ -63,44 +68,28 @@ public class LightCraftClient implements ClientModInitializer {
     }
 
     private KeyBinding registerSafe(String name, int code) {
-        KeyBinding key = createKeyBinding(name, code, "lightcraft.key.category");
-        if (key != null) try { return KeyBindingHelper.registerKeyBinding(key); } catch (Exception e) {}
-        return null;
-    }
-
-    private KeyBinding createKeyBinding(String name, int code, String category) {
-        try { return new KeyBinding(name, InputUtil.Type.KEYSYM, code, category); } catch (Throwable t) { 
-            try { return new KeyBinding(name, code, category); } catch (Throwable t2) { return null; }
-        }
+        try { return KeyBindingHelper.registerKeyBinding(new KeyBinding(name, InputUtil.Type.KEYSYM, code, "lightcraft.key.category")); } catch (Throwable t) { return null; }
     }
 
     private void onClientTick(MinecraftClient client) {
         if (client.player == null) return;
         
-        // Death Logic
         if (config.deathWaypoint) {
             if (client.player.isDead()) {
                 if (!wasDead) {
-                    waypointManager.addWaypoint("Death Point", client.player.getBlockPos(), 0xFF0000, 
-                        client.world.getRegistryKey().getValue().toString());
+                    waypointManager.addWaypoint("Death", client.player.getBlockPos(), 0xFF0000, client.world.getRegistryKey().getValue().toString());
                     wasDead = true;
                 }
-            } else {
-                wasDead = false;
-            }
+            } else { wasDead = false; }
         }
         
         long handle = client.getWindow().getHandle();
-        boolean f3Down = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_F3) == GLFW.GLFW_PRESS;
-
-        if (!f3Down) {
-            if (checkManualKey(handle, GLFW.GLFW_KEY_H)) toggleHud();
-            if (checkManualKey(handle, GLFW.GLFW_KEY_M)) toggleMinimap();
-            if (checkManualKey(handle, GLFW.GLFW_KEY_K)) openConfig(client);
-            if (checkManualKey(handle, GLFW.GLFW_KEY_B)) addWaypoint(client);
-        }
+        if (checkManualKey(handle, GLFW.GLFW_KEY_H)) { config.hudEnabled = !config.hudEnabled; configManager.saveConfig(config); }
+        if (checkManualKey(handle, GLFW.GLFW_KEY_M)) { config.minimapEnabled = !config.minimapEnabled; configManager.saveConfig(config); }
+        if (checkManualKey(handle, GLFW.GLFW_KEY_K)) client.execute(() -> client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer)));
+        if (checkManualKey(handle, GLFW.GLFW_KEY_B)) client.execute(() -> client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true)));
         
-        hudRenderer.tick();
+        if (hudRenderer != null) hudRenderer.tick();
     }
     
     private boolean checkManualKey(long handle, int key) {
@@ -109,11 +98,6 @@ public class LightCraftClient implements ClientModInitializer {
         keyStates[key] = isDown;
         return isDown && !wasDown;
     }
-
-    private void toggleHud() { config.hudEnabled = !config.hudEnabled; configManager.saveConfig(config); }
-    private void toggleMinimap() { config.minimapEnabled = !config.minimapEnabled; configManager.saveConfig(config); }
-    private void openConfig(MinecraftClient client) { client.execute(() -> client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer))); }
-    private void addWaypoint(MinecraftClient client) { client.execute(() -> client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true))); }
     
     public static LightCraftClient getInstance() { return instance; }
     public ModConfig getConfig() { return config; }
