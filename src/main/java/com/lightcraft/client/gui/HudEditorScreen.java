@@ -45,11 +45,11 @@ public class HudEditorScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            // Convert everything to "Screen Pixels" for detection
             int mx = (int)mouseX;
             int my = (int)mouseY;
             float s = config.hudScale;
             
+            // Check Hitbox (Scaled)
             if (hit(mx, my, config.fpsX, config.fpsY, 60, 15, s)) startDrag("FPS", mx, my, config.fpsX, config.fpsY);
             else if (hit(mx, my, config.coordsX, config.coordsY, 150, 40, s)) startDrag("COORDS", mx, my, config.coordsX, config.coordsY);
             else {
@@ -63,7 +63,6 @@ public class HudEditorScreen extends Screen {
     }
     
     private boolean hit(int mx, int my, int x, int y, int w, int h, float scale) {
-        // Box in screen coordinates
         int bx = (int)(x * scale);
         int by = (int)(y * scale);
         int bw = (int)(w * scale);
@@ -84,7 +83,8 @@ public class HudEditorScreen extends Screen {
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (isDragging && draggedElement != null) {
             float scale = config.hudScale;
-            // Calculate movement in HUD units
+            
+            // Movement calculated in raw screen pixels, then converted back to HUD units
             int dx = (int)((mouseX - dragStartX) / scale);
             int dy = (int)((mouseY - dragStartY) / scale);
             
@@ -100,7 +100,6 @@ public class HudEditorScreen extends Screen {
             if (draggedElement.equals("COORDS")) { config.coordsX = newX; config.coordsY = newY; }
             if (draggedElement.equals("MINIMAP")) {
                 int screenW = (int)(width / scale);
-                // Smart right alignment check
                 if (newX > screenW / 2) config.minimapX = newX - screenW;
                 else config.minimapX = newX;
                 config.minimapY = newY;
