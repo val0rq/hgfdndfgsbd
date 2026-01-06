@@ -8,7 +8,6 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.entity.Entity;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -37,7 +36,7 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        // 1. Draw 2D Waypoint Markers (Safe)
+        // 1. Draw 2D Waypoint Markers
         try {
             if (config.renderWaypointsInWorld && client.player != null) {
                 renderFloatingWaypoints(context, client, width, height);
@@ -71,8 +70,9 @@ public class HudRenderer {
     }
 
     private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
-        Vec3d camPos = getEntityPosSafe(client.cameraEntity);
-        if (camPos == null) return;
+        // FIXED: Use client.player directly. It is public and won't crash.
+        if (client.player == null) return;
+        Vec3d camPos = client.player.getPos();
         
         String dim = client.world.getRegistryKey().getValue().toString();
 
@@ -84,35 +84,23 @@ public class HudRenderer {
             double dz = wp.z - camPos.z;
             double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
             
-            if (dist < 1000) {
+            if (dist < 2000) {
                 String distStr = wp.name + " " + (int)dist + "m";
                 int textW = client.textRenderer.getWidth(distStr);
-                int yPos = (dist < 50) ? h/2 + 10 : 30; // Closer = lower on screen
-                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, wp.color, true);
+                
+                // Draw text at the top of the screen (Compass style) if far, or near crosshair if close
+                // This simple logic avoids 3D projection math that crashes on 1.21.11
+                int yPos = (dist < 50) ? h/2 + 20 : 40; 
+                
+                // Color based on distance?
+                int color = wp.color;
+                
+                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, color, true);
             }
         }
     }
     
-    // --- Bulletproof Reflection Methods ---
-    
-    private static Vec3d getEntityPosSafe(Entity entity) {
-        if (entity == null) return null;
-        try {
-            // Try standard getter
-            return entity.getPos();
-        } catch (Throwable t) {
-            try {
-                // Try fields directly (x, y, z often exist)
-                Field xF = Entity.class.getDeclaredField("x"); xF.setAccessible(true);
-                Field yF = Entity.class.getDeclaredField("y"); yF.setAccessible(true);
-                Field zF = Entity.class.getDeclaredField("z"); zF.setAccessible(true);
-                return new Vec3d(xF.getDouble(entity), yF.getDouble(entity), zF.getDouble(entity));
-            } catch (Exception e) {
-                return null; // Give up safely
-            }
-        }
-    }
-
+    // --- Safe Reflection Methods ---
     public static void drawTextSafe(DrawContext context, TextRenderer tr, String text, int x, int y, int color, boolean shadow) {
         try {
             if (drawTextMethod == null) {
