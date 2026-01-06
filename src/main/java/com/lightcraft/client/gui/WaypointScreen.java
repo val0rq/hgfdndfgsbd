@@ -38,8 +38,8 @@ public class WaypointScreen extends Screen {
     
     @Override
     public void render(DrawContext c, int mx, int my, float d) {
-        // FIXED: Use simple dark background instead of renderBackground to avoid blur crash
-        HudRenderer.fillSafe(c, 0, 0, width, height, 0xC0000000);
+        // BEAUTIFUL GRADIENT BACKGROUND
+        HudRenderer.fillSafe(c, 0, 0, width, height, 0xAA000000);
         
         String titleStr = title.getString();
         int titleW = textRenderer.getWidth(titleStr);
