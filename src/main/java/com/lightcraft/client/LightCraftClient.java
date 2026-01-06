@@ -1,15 +1,15 @@
 package com.lightcraft.client;
 
-import com.lightcraft.client.gui.ConfigScreen;
-import com.lightcraft.client.gui.HudRenderer;
-import com.lightcraft.client.gui.WaypointScreen;
+import com.lightcraft.client.gui.*;
 import com.lightcraft.client.minimap.WaypointManager;
+import com.lightcraft.client.render.WaypointWorldRenderer;
 import com.lightcraft.config.ConfigManager;
 import com.lightcraft.config.ModConfig;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
@@ -29,17 +29,15 @@ public class LightCraftClient implements ClientModInitializer {
     private HudRenderer hudRenderer;
     private WaypointManager waypointManager;
     
-    private KeyBinding toggleHudKey;
-    private KeyBinding toggleMinimapKey;
-    private KeyBinding openConfigKey;
-    private KeyBinding addWaypointKey;
-    
+    private KeyBinding toggleHudKey, toggleMinimapKey, openConfigKey, addWaypointKey;
     private final boolean[] keyStates = new boolean[512];
+    
+    private boolean wasDead = false; // For death tracking
     
     @Override
     public void onInitializeClient() {
         instance = this;
-        LOGGER.info("Initializing LightCraft...");
+        LOGGER.info("Initializing LightCraft Ultimate...");
         
         configManager = new ConfigManager();
         config = configManager.loadConfig();
@@ -48,6 +46,7 @@ public class LightCraftClient implements ClientModInitializer {
         
         registerKeybindings();
         
+        // HUD
         HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             try {
                 MinecraftClient client = MinecraftClient.getInstance();
@@ -58,43 +57,49 @@ public class LightCraftClient implements ClientModInitializer {
             } catch (Exception e) {}
         });
         
+        // 3D Waypoints
+        WorldRenderEvents.AFTER_TRANSLUCENT.register(WaypointWorldRenderer::render);
+        
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
     
+    // ... Keybinding code remains same ...
     private void registerKeybindings() {
         toggleHudKey = registerSafe("lightcraft.key.toggle_hud", GLFW.GLFW_KEY_H);
         toggleMinimapKey = registerSafe("lightcraft.key.toggle_minimap", GLFW.GLFW_KEY_M);
         openConfigKey = registerSafe("lightcraft.key.open_config", GLFW.GLFW_KEY_K);
         addWaypointKey = registerSafe("lightcraft.key.add_waypoint", GLFW.GLFW_KEY_B);
     }
-
     private KeyBinding registerSafe(String name, int code) {
         KeyBinding key = createKeyBinding(name, code, "lightcraft.key.category");
-        if (key != null) {
-            try { return KeyBindingHelper.registerKeyBinding(key); } catch (Exception e) {}
-        }
+        if (key != null) try { return KeyBindingHelper.registerKeyBinding(key); } catch (Exception e) {}
         return null;
     }
-
     private KeyBinding createKeyBinding(String name, int code, String category) {
-        try {
-            return new KeyBinding(name, InputUtil.Type.KEYSYM, code, category);
-        } catch (Throwable t1) {
-            try {
-                return new KeyBinding(name, code, category);
-            } catch (Throwable t2) {
-                return null;
-            }
-        }
+        try { return new KeyBinding(name, InputUtil.Type.KEYSYM, code, category); } catch (Throwable t) { return null; }
     }
-    
+    // ...
+
     private void onClientTick(MinecraftClient client) {
         if (client.player == null) return;
         
+        // Death Logic
+        if (config.deathWaypoint) {
+            if (client.player.isDead()) {
+                if (!wasDead) {
+                    waypointManager.addWaypoint("Death Point", client.player.getBlockPos(), 0xFF0000, 
+                        client.world.getRegistryKey().getValue().toString());
+                    wasDead = true;
+                }
+            } else {
+                wasDead = false;
+            }
+        }
+        
+        // Inputs
         long handle = client.getWindow().getHandle();
         boolean f3Down = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_F3) == GLFW.GLFW_PRESS;
 
-        // Only process mod keys if F3 is NOT pressed
         if (!f3Down) {
             if (checkManualKey(handle, GLFW.GLFW_KEY_H)) toggleHud();
             if (checkManualKey(handle, GLFW.GLFW_KEY_M)) toggleMinimap();
@@ -112,23 +117,10 @@ public class LightCraftClient implements ClientModInitializer {
         return isDown && !wasDown;
     }
 
-    private void toggleHud() {
-        config.hudEnabled = !config.hudEnabled;
-        configManager.saveConfig(config);
-    }
-    
-    private void toggleMinimap() {
-        config.minimapEnabled = !config.minimapEnabled;
-        configManager.saveConfig(config);
-    }
-    
-    private void openConfig(MinecraftClient client) {
-        client.execute(() -> client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer)));
-    }
-    
-    private void addWaypoint(MinecraftClient client) {
-        client.execute(() -> client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true)));
-    }
+    private void toggleHud() { config.hudEnabled = !config.hudEnabled; configManager.saveConfig(config); }
+    private void toggleMinimap() { config.minimapEnabled = !config.minimapEnabled; configManager.saveConfig(config); }
+    private void openConfig(MinecraftClient client) { client.execute(() -> client.setScreen(new ConfigScreen(config, configManager, waypointManager, hudRenderer))); }
+    private void addWaypoint(MinecraftClient client) { client.execute(() -> client.setScreen(new WaypointScreen(config, configManager, waypointManager, client.player.getBlockPos(), true))); }
     
     public static LightCraftClient getInstance() { return instance; }
     public ModConfig getConfig() { return config; }
