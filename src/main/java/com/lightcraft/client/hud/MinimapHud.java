@@ -124,7 +124,8 @@ public class MinimapHud {
                     
                     // Fallback for weird 1.21 map colors if they return 0
                     if (color == 0) {
-                        if (state.getMaterial().isLiquid()) color = 0x4040FF;
+                        // FIXED: Replaced getMaterial().isLiquid() with getFluidState check
+                        if (!state.getFluidState().isEmpty()) color = 0x4040FF;
                         else color = 0x7F7F7F; 
                     }
                     
