@@ -17,6 +17,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.RotationAxis;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
+import java.lang.reflect.Constructor;
 
 public class MinimapHud {
     private final ModConfig config;
@@ -26,7 +27,8 @@ public class MinimapHud {
     private NativeImage mapImage;
     private NativeImageBackedTexture mapTexture;
     private Identifier mapTextureId;
-    private final int MAP_SIZE = 128; // Internal resolution
+    private final int MAP_SIZE = 128;
+    private boolean initialized = false;
     
     private int lastPlayerX = Integer.MAX_VALUE;
     private int lastPlayerZ = Integer.MAX_VALUE;
@@ -35,17 +37,42 @@ public class MinimapHud {
         this.config = config;
         this.waypointManager = wm;
         
-        // Initialize Texture
-        this.mapImage = new NativeImage(MAP_SIZE, MAP_SIZE, false);
-        this.mapTexture = new NativeImageBackedTexture(mapImage);
-        
-        // Register texture with a unique ID
-        MinecraftClient client = MinecraftClient.getInstance();
-        // Dynamic registration usually returns an Identifier or we provide a name
-        this.mapTextureId = client.getTextureManager().registerDynamicTexture("lightcraft_minimap", this.mapTexture);
+        try {
+            // SAFE INITIALIZATION
+            this.mapImage = new NativeImage(MAP_SIZE, MAP_SIZE, false);
+            
+            // Try standard constructor first
+            try {
+                this.mapTexture = new NativeImageBackedTexture(mapImage);
+            } catch (Throwable t) {
+                // Reflection Fallback for weird versions
+                try {
+                    Constructor<?>[] ctors = NativeImageBackedTexture.class.getConstructors();
+                    for (Constructor<?> c : ctors) {
+                        if (c.getParameterCount() == 1 && c.getParameterTypes()[0] == NativeImage.class) {
+                            this.mapTexture = (NativeImageBackedTexture) c.newInstance(mapImage);
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                    System.out.println("LightCraft: Minimap failed to init texture");
+                }
+            }
+
+            if (this.mapTexture != null) {
+                MinecraftClient client = MinecraftClient.getInstance();
+                this.mapTextureId = client.getTextureManager().registerDynamicTexture("lightcraft_minimap", this.mapTexture);
+                this.initialized = true;
+            }
+        } catch (Throwable t) {
+            // Prevent launch crash if everything fails
+            this.initialized = false;
+        }
     }
     
     public void render(DrawContext context, int w, int h, float tickDelta) {
+        if (!initialized) return; // Don't render if init failed
+        
         MinecraftClient client = MinecraftClient.getInstance();
         PlayerEntity player = client.player;
         if (player == null || client.world == null) return;
@@ -55,17 +82,14 @@ public class MinimapHud {
         int x = config.minimapX < 0 ? w + config.minimapX : config.minimapX;
         int y = config.minimapY;
         
-        // Update Logic (Chunk based)
         int px = (int) player.getX();
         int pz = (int) player.getZ();
         
-        // Only update if moved to save performance
         if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || client.player.age % 20 == 0) {
             updateTexture(client.world, px, (int)player.getY(), pz);
             lastPlayerX = px; lastPlayerZ = pz;
         }
 
-        // Draw Border
         HudRenderer.fillSafe(context, x - 2, y - 2, x + size + 2, y + size + 2, config.minimapBorderColor);
         HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF000000);
         HudRenderer.enableScissorSafe(context, x, y, x+size, y+size);
@@ -73,51 +97,36 @@ public class MinimapHud {
         MatrixStack matrices = HudRenderer.getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
-            
-            // Move to center
             matrices.translate(x + halfSize, y + halfSize, 0);
             
-            // Rotate Map
             float angle = config.minimapRotate ? player.getYaw() + 180.0f : 180.0f;
             matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
             
-            // Scale based on zoom
             float scale = (float)size / (float)(MAP_SIZE / Math.max(1, config.minimapZoom));
             matrices.scale(scale, scale, 1.0f);
             
-            // Draw The Texture! (Centered at 0,0 because we translated)
-            // Using DrawTextureSafe via reflection to bypass 1.21.11 changes
             int drawSize = MAP_SIZE;
-            HudRenderer.drawTextureSafe(context, mapTextureId, -drawSize/2, -drawSize/2, 0, 0, drawSize, drawSize);
+            if (mapTextureId != null) {
+                HudRenderer.drawTextureSafe(context, mapTextureId, -drawSize/2, -drawSize/2, 0, 0, drawSize, drawSize);
+            }
             
-            // Draw Entities on top of map
             if (config.minimapShowEntities) {
-                float entityScale = 1.0f / scale; // Keep dots consistent size
                 for (Entity e : client.world.getEntities()) {
                     if (e == player) continue;
-                    
-                    double edx = (player.getX() - e.getX()); // Inverted
+                    double edx = (player.getX() - e.getX());
                     double edz = (player.getZ() - e.getZ());
                     
-                    // Simple dot drawing relative to center
-                    // We must scale coordinates to match map texture space
-                    // Map is 128x128 pixels, representing 128x128 blocks (at zoom 1)
-                    
-                    // Check if within render range
                     if (Math.abs(edx) < 60 && Math.abs(edz) < 60) {
                         int entColor = (e instanceof PlayerEntity) ? 0xFFFFFFFF : 0xFFFF0000;
                         int ex = (int)(edx);
                         int ez = (int)(edz);
-                        // Draw a 2x2 dot
                         HudRenderer.fillSafe(context, ex-1, ez-1, ex+1, ez+1, entColor);
                     }
                 }
             }
-
             matrices.pop();
         }
         
-        // Player Marker (Center Screen)
         HudRenderer.fillSafe(context, x + halfSize - 2, y + halfSize - 2, x + halfSize + 2, y + halfSize + 2, 0xFF00FF00);
         HudRenderer.disableScissorSafe(context);
         
@@ -127,61 +136,45 @@ public class MinimapHud {
     }
     
     private void updateTexture(World world, int px, int py, int pz) {
+        if (mapImage == null) return;
         BlockPos.Mutable pos = new BlockPos.Mutable();
         int offset = MAP_SIZE / 2;
         
         for (int x = 0; x < MAP_SIZE; x++) {
             for (int z = 0; z < MAP_SIZE; z++) {
-                // Calculate world position for this pixel
                 int worldX = px + (x - offset);
                 int worldZ = pz + (z - offset);
                 
-                // Get Heightmap Surface
-                int surfaceY = world.getTopY(Heightmap.Type.WORLD_SURFACE, worldX, worldZ);
-                pos.set(worldX, surfaceY - 1, worldZ);
-                
-                BlockState state = world.getBlockState(pos);
-                MapColor mapColor = state.getMapColor(world, pos);
-                
-                int color = 0;
-                
-                // Try standard map color
-                if (mapColor != null) {
-                    color = mapColor.color;
+                // RAYCAST SCAN to find surface
+                boolean found = false;
+                for (int y = py + 20; y > -64; y--) {
+                    pos.set(worldX, y, worldZ);
+                    BlockState state = world.getBlockState(pos);
+                    
+                    if (!state.isAir()) {
+                        MapColor mapColor = state.getMapColor(world, pos);
+                        if (mapColor != null) {
+                            int color = mapColor.color;
+                            if (color == 0) color = 0x7F7F7F;
+                            if (!state.getFluidState().isEmpty()) color = 0x4040FF;
+                            
+                            if (y < py) color = darken(color, 20);
+                            else if (y > py) color = brighten(color, 20);
+                            
+                            int r = (color >> 16) & 0xFF;
+                            int g = (color >> 8) & 0xFF;
+                            int b = (color) & 0xFF;
+                            int finalColor = 0xFF000000 | (b << 16) | (g << 8) | r;
+                            
+                            mapImage.setColor(x, z, finalColor);
+                            found = true;
+                            break;
+                        }
+                    }
                 }
-                
-                // Fallback / Water handling
-                if (color == 0) {
-                    if (!state.getFluidState().isEmpty()) color = 0x4040FF; // Blue
-                    else color = 0x000000; // Void
-                }
-                
-                // If standard color is found, apply shading
-                if (color != 0) {
-                    // Shading logic
-                    if (surfaceY < py) color = darken(color, 20);
-                    else if (surfaceY > py) color = brighten(color, 20);
-                    
-                    // NativeImage expects ABGR (Alpha Blue Green Red) or ARGB depending on endianness
-                    // But usually 0xAABBGGRR. We have 0xRRGGBB.
-                    // Minecraft's ColorHelper handles this, but let's do manual bit shifting to be safe.
-                    // NativeImage.setColor wants: Alpha (24-31), Blue (16-23), Green (8-15), Red (0-7)
-                    
-                    int r = (color >> 16) & 0xFF;
-                    int g = (color >> 8) & 0xFF;
-                    int b = (color) & 0xFF;
-                    
-                    // Pack as ABGR (0xFFBBGGRR)
-                    int finalColor = 0xFF000000 | (b << 16) | (g << 8) | r;
-                    
-                    mapImage.setColor(x, z, finalColor);
-                } else {
-                    mapImage.setColor(x, z, 0xFF000000); // Black
-                }
+                if (!found) mapImage.setColor(x, z, 0xFF000000);
             }
         }
-        
-        // Upload to GPU
         mapTexture.upload();
     }
     
