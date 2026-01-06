@@ -16,7 +16,6 @@ public class HudRenderer {
     private final FpsHud fpsHud;
     private final CoordsHud coordsHud;
     private final MinimapHud minimapHud;
-    private final WaypointManager waypointManager;
     private boolean editMode = false;
     
     private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod, drawTextureMethod;
@@ -24,7 +23,6 @@ public class HudRenderer {
 
     public HudRenderer(ModConfig config, WaypointManager waypointManager) {
         this.config = config;
-        this.waypointManager = waypointManager;
         this.fpsHud = new FpsHud(config);
         this.coordsHud = new CoordsHud(config);
         this.minimapHud = new MinimapHud(config, waypointManager);
@@ -36,7 +34,7 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        // Waypoints are now handled by WorldRendererMixin!
+        // Note: 3D Waypoints handled by WorldRendererMixin
 
         MatrixStack matrices = getMatricesSafe(context);
         if (matrices != null) {
