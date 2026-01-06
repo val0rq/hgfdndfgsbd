@@ -2,7 +2,6 @@ package com.lightcraft.client;
 
 import com.lightcraft.client.gui.*;
 import com.lightcraft.client.minimap.WaypointManager;
-import com.lightcraft.client.render.WaypointWorldRenderer;
 import com.lightcraft.config.ConfigManager;
 import com.lightcraft.config.ModConfig;
 import net.fabricmc.api.ClientModInitializer;
@@ -43,7 +42,6 @@ public class LightCraftClient implements ClientModInitializer {
         
         registerKeybindings();
         
-        // HUD Registration (Safe)
         HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             try {
                 MinecraftClient client = MinecraftClient.getInstance();
@@ -54,29 +52,7 @@ public class LightCraftClient implements ClientModInitializer {
             } catch (Exception e) {}
         });
         
-        // 3D Waypoints Registration (Protected against NoClassDefFoundError)
-        attemptRegisterWorldRenderer();
-        
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
-    }
-
-    private void attemptRegisterWorldRenderer() {
-        try {
-            // We use a helper method to isolate the class loading
-            // If WorldRenderEvents doesn't exist, this throws an error we can catch
-            WorldRenderHelper.register();
-            LOGGER.info("3D Waypoint Rendering initialized.");
-        } catch (Throwable t) {
-            LOGGER.warn("3D World Rendering disabled (API missing in this version): " + t.getMessage());
-        }
-    }
-
-    // Isolated inner class to prevent main class verification failure
-    private static class WorldRenderHelper {
-        static void register() {
-            net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents.AFTER_TRANSLUCENT
-                .register(WaypointWorldRenderer::render);
-        }
     }
     
     private void registerKeybindings() {
@@ -114,7 +90,6 @@ public class LightCraftClient implements ClientModInitializer {
             }
         }
         
-        // Manual Input Fallback
         long handle = client.getWindow().getHandle();
         boolean f3Down = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_F3) == GLFW.GLFW_PRESS;
 
