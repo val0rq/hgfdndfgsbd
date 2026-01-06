@@ -2,6 +2,7 @@ package com.lightcraft.client.render;
 
 import com.lightcraft.config.ModConfig;
 import com.lightcraft.client.LightCraftClient;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.*;
 import net.minecraft.client.util.math.MatrixStack;
@@ -25,10 +26,12 @@ public class WaypointWorldRenderer {
         RenderSystem.disableCull();
         
         Tessellator tessellator = Tessellator.getInstance();
-        // Use reflection-safe buffer builder if possible, but standard likely works for this
-        // We will try standard first.
+        
         try {
+             // In 1.21, we use specific render layers, but raw buffer building is safer via reflection or try-catch 
+             // if the method signatures change between minor versions.
              BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
+             
              MatrixStack matrices = context.matrixStack();
              matrices.push();
              matrices.translate(-camPos.x, -camPos.y, -camPos.z);
@@ -36,20 +39,22 @@ public class WaypointWorldRenderer {
              
              for (ModConfig.Waypoint wp : config.waypoints) {
                  if (!wp.enabled) continue;
-                 // Simple Vertical Beam
+                 
+                 // Extract colors
                  float r = ((wp.color >> 16) & 0xFF) / 255f;
                  float g = ((wp.color >> 8) & 0xFF) / 255f;
                  float b = (wp.color & 0xFF) / 255f;
                  
-                 // Draw line from y=0 to y=320
+                 // Draw Vertical Beam (y=0 to y=320)
                  buffer.vertex(mat, wp.x + 0.5f, 0, wp.z + 0.5f).color(r, g, b, 0.5f);
                  buffer.vertex(mat, wp.x + 0.5f, 320, wp.z + 0.5f).color(r, g, b, 0.5f);
              }
              
              BufferRenderer.drawWithGlobalProgram(buffer.end());
              matrices.pop();
+             
         } catch (Exception e) {
-             // Fallback for 1.21 changes in BufferBuilder
+             // Silently fail if rendering changes in 1.21.11 to prevent crashing
         }
         
         RenderSystem.enableDepthTest();
