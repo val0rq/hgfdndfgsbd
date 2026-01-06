@@ -25,9 +25,8 @@ public class HudEditorScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        HudRenderer.fillSafe(context, 0, 0, width, height, 0x99000000); // Dark Glass BG
+        HudRenderer.fillSafe(context, 0, 0, width, height, 0x99000000); 
         
-        // Draw Grid
         if (config.hudEditorGridSnap) {
             int size = config.hudEditorGridSize;
             for (int x = 0; x < width; x+=size) HudRenderer.fillSafe(context, x, 0, x+1, height, 0x1FFFFFFF);
@@ -46,17 +45,16 @@ public class HudEditorScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
+            // Convert everything to "Screen Pixels" for detection
             int mx = (int)mouseX;
             int my = (int)mouseY;
+            float s = config.hudScale;
             
-            // Adjust for scale because render draws scaled, but we click in screen space
-            float scale = config.hudScale;
-            
-            if (checkHit(mx, my, config.fpsX, config.fpsY, 60, 15, scale)) startDrag("FPS", mx, my, config.fpsX, config.fpsY);
-            else if (checkHit(mx, my, config.coordsX, config.coordsY, 150, 40, scale)) startDrag("COORDS", mx, my, config.coordsX, config.coordsY);
+            if (hit(mx, my, config.fpsX, config.fpsY, 60, 15, s)) startDrag("FPS", mx, my, config.fpsX, config.fpsY);
+            else if (hit(mx, my, config.coordsX, config.coordsY, 150, 40, s)) startDrag("COORDS", mx, my, config.coordsX, config.coordsY);
             else {
-                int mmX = config.minimapX < 0 ? (int)(width/scale) + config.minimapX : config.minimapX;
-                if (checkHit(mx, my, mmX, config.minimapY, config.minimapSize, config.minimapSize, scale)) {
+                int mmX = config.minimapX < 0 ? (int)(width/s) + config.minimapX : config.minimapX;
+                if (hit(mx, my, mmX, config.minimapY, config.minimapSize, config.minimapSize, s)) {
                     startDrag("MINIMAP", mx, my, mmX, config.minimapY);
                 }
             }
@@ -64,12 +62,13 @@ public class HudEditorScreen extends Screen {
         return super.mouseClicked(mouseX, mouseY, button);
     }
     
-    private boolean checkHit(int mx, int my, int x, int y, int w, int h, float scale) {
-        int sx = (int)(x * scale);
-        int sy = (int)(y * scale);
-        int sw = (int)(w * scale);
-        int sh = (int)(h * scale);
-        return mx >= sx && mx <= sx + sw && my >= sy && my <= sy + sh;
+    private boolean hit(int mx, int my, int x, int y, int w, int h, float scale) {
+        // Box in screen coordinates
+        int bx = (int)(x * scale);
+        int by = (int)(y * scale);
+        int bw = (int)(w * scale);
+        int bh = (int)(h * scale);
+        return mx >= bx && mx <= bx + bw && my >= by && my <= by + bh;
     }
 
     private void startDrag(String elem, int mx, int my, int ex, int ey) {
@@ -85,13 +84,13 @@ public class HudEditorScreen extends Screen {
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (isDragging && draggedElement != null) {
             float scale = config.hudScale;
+            // Calculate movement in HUD units
             int dx = (int)((mouseX - dragStartX) / scale);
             int dy = (int)((mouseY - dragStartY) / scale);
             
             int newX = initialElemX + dx;
             int newY = initialElemY + dy;
             
-            // Snap
             if (config.hudEditorGridSnap) {
                 newX = (newX / 10) * 10;
                 newY = (newY / 10) * 10;
@@ -101,6 +100,7 @@ public class HudEditorScreen extends Screen {
             if (draggedElement.equals("COORDS")) { config.coordsX = newX; config.coordsY = newY; }
             if (draggedElement.equals("MINIMAP")) {
                 int screenW = (int)(width / scale);
+                // Smart right alignment check
                 if (newX > screenW / 2) config.minimapX = newX - screenW;
                 else config.minimapX = newX;
                 config.minimapY = newY;
