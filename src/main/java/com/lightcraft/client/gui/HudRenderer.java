@@ -8,7 +8,6 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.Identifier;
-import net.minecraft.util.math.Vec3d;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -37,11 +36,7 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        try {
-            if (config.renderWaypointsInWorld && client.player != null) {
-                renderFloatingWaypoints(context, client, width, height);
-            }
-        } catch (Throwable t) {}
+        // Waypoints are now handled by WorldRendererMixin!
 
         MatrixStack matrices = getMatricesSafe(context);
         if (matrices != null) {
@@ -64,32 +59,6 @@ public class HudRenderer {
         } catch (Throwable t) {}
         
         if (matrices != null) matrices.pop();
-    }
-
-    private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
-        if (client.player == null) return;
-        // Use safe coordinate retrieval
-        double cx = client.player.getX();
-        double cy = client.player.getY();
-        double cz = client.player.getZ();
-        
-        String dim = client.world.getRegistryKey().getValue().toString();
-
-        for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
-            if (!wp.enabled || !wp.dimension.equals(dim)) continue;
-
-            double dx = wp.x - cx;
-            double dy = wp.y - cy;
-            double dz = wp.z - cz;
-            double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-            
-            if (dist < 5000) {
-                String distStr = wp.name + " (" + (int)dist + "m)";
-                int textW = client.textRenderer.getWidth(distStr);
-                int yPos = (dist < 50) ? h/2 + 20 : 40; 
-                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, wp.color, true);
-            }
-        }
     }
     
     // --- Safe Reflection Methods ---
