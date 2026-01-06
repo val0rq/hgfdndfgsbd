@@ -41,31 +41,32 @@ public class MinimapHud {
         int cx = x + halfSize;
         int cy = y + halfSize;
         
-        // Update Data
         int px = (int) player.getX();
         int pz = (int) player.getZ();
         
-        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || System.currentTimeMillis() - lastUpdate > 250) {
-            updateMapData(client.world, px, pz);
+        // Only update if moved to save FPS
+        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || System.currentTimeMillis() - lastUpdate > 500) {
+            updateMapData(client.world, px, (int)player.getY(), pz);
             lastPlayerX = px; lastPlayerZ = pz; lastUpdate = System.currentTimeMillis();
         }
 
-        // Draw Border/BG
         HudRenderer.fillSafe(context, x - 1, y - 1, x + size + 1, y + size + 1, config.minimapBorderColor);
         HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF000000);
         HudRenderer.enableScissorSafe(context, x, y, x+size, y+size);
         
-        // Matrix Rotation
         MatrixStack matrices = HudRenderer.getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
             matrices.translate(cx, cy, 0);
             
-            float angle = config.minimapRotate ? player.getYaw() + 180.0f : 180.0f;
-            matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
+            if (config.minimapRotate) {
+                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(player.getYaw() + 180.0f));
+            } else {
+                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(180.0f));
+            }
             
             int zoom = Math.max(1, config.minimapZoom);
-            int renderRange = 60; // Cache limit
+            int renderRange = 50; 
             
             for (int rX = -renderRange; rX < renderRange; rX++) {
                 for (int rZ = -renderRange; rZ < renderRange; rZ++) {
@@ -76,19 +77,6 @@ public class MinimapHud {
                         if (color != 0) {
                              HudRenderer.fillSafe(context, rX * zoom, rZ * zoom, (rX + 1) * zoom, (rZ + 1) * zoom, color);
                         }
-                    }
-                }
-            }
-            
-            // Entities
-            if (config.minimapShowEntities) {
-                for (Entity e : client.world.getEntities()) {
-                    if (e == player) continue;
-                    double edx = (player.getX() - e.getX()) * zoom;
-                    double edz = (player.getZ() - e.getZ()) * zoom;
-                    if (Math.sqrt(edx*edx + edz*edz) < halfSize) {
-                         int c = (e instanceof PlayerEntity) ? 0xFFFFFFFF : 0xFFFF0000;
-                         HudRenderer.fillSafe(context, (int)edx - 1, (int)edz - 1, (int)edx + 1, (int)edz + 1, c);
                     }
                 }
             }
@@ -103,51 +91,28 @@ public class MinimapHud {
         }
     }
     
-    private void updateMapData(World world, int px, int pz) {
+    private void updateMapData(World world, int px, int py, int pz) {
         BlockPos.Mutable pos = new BlockPos.Mutable();
-        int py = (int) MinecraftClient.getInstance().player.getY();
         
         for (int x = -64; x < 64; x++) {
             for (int z = -64; z < 64; z++) {
                 int worldX = px + x;
                 int worldZ = pz + z;
                 
-                // Use OCEAN_FLOOR_WG to find top solid block (includes under water)
-                int topY = world.getTopY(Heightmap.Type.OCEAN_FLOOR_WG, worldX, worldZ);
-                pos.set(worldX, topY, worldZ);
+                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, worldX, worldZ);
+                pos.set(worldX, topY - 1, worldZ);
                 
                 BlockState state = world.getBlockState(pos);
-                // If it's air at topY (unlikely for ocean floor), search down
-                if (state.isAir()) {
-                    for (int y = topY; y > -64; y--) {
-                        pos.set(worldX, y, worldZ);
-                        state = world.getBlockState(pos);
-                        if (!state.isAir()) {
-                            topY = y;
-                            break;
-                        }
-                    }
-                }
-
                 MapColor mapColor = state.getMapColor(world, pos);
-                int color = 0;
+                int color = (mapColor != null) ? mapColor.color : 0x7F7F7F;
                 
-                if (mapColor != null) color = mapColor.color;
+                if (!state.getFluidState().isEmpty()) color = 0x4040FF;
+                if (color == 0) color = 0x555555;
                 
-                // Water check
-                if (!world.getFluidState(pos.up()).isEmpty() || !state.getFluidState().isEmpty()) {
-                    color = 0x4040FF;
-                }
+                if (topY < py) color = darken(color, 20);
+                if (topY > py) color = brighten(color, 20);
                 
-                if (color == 0) color = 0x555555; // Dark gray fallback
-                
-                color = color | 0xFF000000; // Force Opaque
-                
-                // Shading
-                if (topY < py) color = darken(color, 30);
-                if (topY > py) color = brighten(color, 30);
-                
-                colorCache[x + 64][z + 64] = color;
+                colorCache[x + 64][z + 64] = color | 0xFF000000;
             }
         }
     }
@@ -156,13 +121,13 @@ public class MinimapHud {
         int r = Math.max(0, ((color >> 16) & 0xFF) - amount);
         int g = Math.max(0, ((color >> 8) & 0xFF) - amount);
         int b = Math.max(0, (color & 0xFF) - amount);
-        return 0xFF000000 | (r << 16) | (g << 8) | b;
+        return (r << 16) | (g << 8) | b;
     }
     
     private int brighten(int color, int amount) {
         int r = Math.min(255, ((color >> 16) & 0xFF) + amount);
         int g = Math.min(255, ((color >> 8) & 0xFF) + amount);
         int b = Math.min(255, (color & 0xFF) + amount);
-        return 0xFF000000 | (r << 16) | (g << 8) | b;
+        return (r << 16) | (g << 8) | b;
     }
 }
