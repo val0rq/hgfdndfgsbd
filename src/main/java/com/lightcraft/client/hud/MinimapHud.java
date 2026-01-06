@@ -21,6 +21,7 @@ public class MinimapHud {
     private int[][] colorCache;
     private int lastPlayerX = Integer.MAX_VALUE;
     private int lastPlayerZ = Integer.MAX_VALUE;
+    private long lastUpdate = 0;
     
     public MinimapHud(ModConfig config, WaypointManager wm) {
         this.config = config;
@@ -34,39 +35,40 @@ public class MinimapHud {
         if (player == null || client.world == null) return;
         
         int size = config.minimapSize;
+        int halfSize = size / 2;
         int x = config.minimapX < 0 ? w + config.minimapX : config.minimapX;
         int y = config.minimapY;
+        int cx = x + halfSize;
+        int cy = y + halfSize;
         
-        // Update check
+        // Update Data
         int px = (int) player.getX();
         int pz = (int) player.getZ();
         
-        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || client.player.age % 10 == 0) {
-            updateMapData(client.world, px, (int)player.getY(), pz);
-            lastPlayerX = px; lastPlayerZ = pz;
+        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || System.currentTimeMillis() - lastUpdate > 250) {
+            updateMapData(client.world, px, pz);
+            lastPlayerX = px; lastPlayerZ = pz; lastUpdate = System.currentTimeMillis();
         }
 
-        // Draw Background
-        HudRenderer.fillSafe(context, x - 1, y - 1, x + size + 1, y + size + 1, 0xFF000000);
-        HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF222222);
+        // Draw Border/BG
+        HudRenderer.fillSafe(context, x - 1, y - 1, x + size + 1, y + size + 1, config.minimapBorderColor);
+        HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF000000);
         HudRenderer.enableScissorSafe(context, x, y, x+size, y+size);
         
+        // Matrix Rotation
         MatrixStack matrices = HudRenderer.getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
-            matrices.translate(x + size/2, y + size/2, 0);
+            matrices.translate(cx, cy, 0);
             
-            if (config.minimapRotate) {
-                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(player.getYaw() + 180.0f));
-            } else {
-                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(180.0f));
-            }
+            float angle = config.minimapRotate ? player.getYaw() + 180.0f : 180.0f;
+            matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
             
             int zoom = Math.max(1, config.minimapZoom);
-            int range = 40;
+            int renderRange = 60; // Cache limit
             
-            for (int rX = -range; rX < range; rX++) {
-                for (int rZ = -range; rZ < range; rZ++) {
+            for (int rX = -renderRange; rX < renderRange; rX++) {
+                for (int rZ = -renderRange; rZ < renderRange; rZ++) {
                     int cX = rX + 64;
                     int cZ = rZ + 64;
                     if (cX >= 0 && cX < 128 && cZ >= 0 && cZ < 128) {
@@ -84,7 +86,7 @@ public class MinimapHud {
                     if (e == player) continue;
                     double edx = (player.getX() - e.getX()) * zoom;
                     double edz = (player.getZ() - e.getZ()) * zoom;
-                    if (Math.abs(edx) < size/2 && Math.abs(edz) < size/2) {
+                    if (Math.sqrt(edx*edx + edz*edz) < halfSize) {
                          int c = (e instanceof PlayerEntity) ? 0xFFFFFFFF : 0xFFFF0000;
                          HudRenderer.fillSafe(context, (int)edx - 1, (int)edz - 1, (int)edx + 1, (int)edz + 1, c);
                     }
@@ -93,12 +95,17 @@ public class MinimapHud {
             matrices.pop();
         }
         
-        HudRenderer.fillSafe(context, x + size/2 - 1, y + size/2 - 1, x + size/2 + 1, y + size/2 + 1, 0xFF00FF00);
+        HudRenderer.fillSafe(context, cx - 1, cy - 1, cx + 1, cy + 1, 0xFF00FF00); // Player
         HudRenderer.disableScissorSafe(context);
+        
+        if (!config.minimapRotate) {
+            HudRenderer.drawTextSafe(context, client.textRenderer, "N", cx - 2, y + 2, 0xFFFFFFFF, true);
+        }
     }
     
-    private void updateMapData(World world, int px, int py, int pz) {
+    private void updateMapData(World world, int px, int pz) {
         BlockPos.Mutable pos = new BlockPos.Mutable();
+        int py = (int) MinecraftClient.getInstance().player.getY();
         
         for (int x = -64; x < 64; x++) {
             for (int z = -64; z < 64; z++) {
@@ -120,3 +127,42 @@ public class MinimapHud {
                             break;
                         }
                     }
+                }
+
+                MapColor mapColor = state.getMapColor(world, pos);
+                int color = 0;
+                
+                if (mapColor != null) color = mapColor.color;
+                
+                // Water check
+                if (!world.getFluidState(pos.up()).isEmpty() || !state.getFluidState().isEmpty()) {
+                    color = 0x4040FF;
+                }
+                
+                if (color == 0) color = 0x555555; // Dark gray fallback
+                
+                color = color | 0xFF000000; // Force Opaque
+                
+                // Shading
+                if (topY < py) color = darken(color, 30);
+                if (topY > py) color = brighten(color, 30);
+                
+                colorCache[x + 64][z + 64] = color;
+            }
+        }
+    }
+    
+    private int darken(int color, int amount) {
+        int r = Math.max(0, ((color >> 16) & 0xFF) - amount);
+        int g = Math.max(0, ((color >> 8) & 0xFF) - amount);
+        int b = Math.max(0, (color & 0xFF) - amount);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
+    
+    private int brighten(int color, int amount) {
+        int r = Math.min(255, ((color >> 16) & 0xFF) + amount);
+        int g = Math.min(255, ((color >> 8) & 0xFF) + amount);
+        int b = Math.min(255, (color & 0xFF) + amount);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
+}
