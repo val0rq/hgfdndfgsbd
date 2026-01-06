@@ -9,15 +9,12 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.lang.reflect.Constructor;
 
 public class LightCraftClient implements ClientModInitializer {
     public static final String MOD_ID = "lightcraft";
@@ -32,7 +29,7 @@ public class LightCraftClient implements ClientModInitializer {
     private KeyBinding toggleHudKey, toggleMinimapKey, openConfigKey, addWaypointKey;
     private final boolean[] keyStates = new boolean[512];
     
-    private boolean wasDead = false; // For death tracking
+    private boolean wasDead = false;
     
     @Override
     public void onInitializeClient() {
@@ -46,7 +43,7 @@ public class LightCraftClient implements ClientModInitializer {
         
         registerKeybindings();
         
-        // HUD
+        // HUD Registration (Safe)
         HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             try {
                 MinecraftClient client = MinecraftClient.getInstance();
@@ -57,28 +54,49 @@ public class LightCraftClient implements ClientModInitializer {
             } catch (Exception e) {}
         });
         
-        // 3D Waypoints
-        WorldRenderEvents.AFTER_TRANSLUCENT.register(WaypointWorldRenderer::render);
+        // 3D Waypoints Registration (Protected against NoClassDefFoundError)
+        attemptRegisterWorldRenderer();
         
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
+
+    private void attemptRegisterWorldRenderer() {
+        try {
+            // We use a helper method to isolate the class loading
+            // If WorldRenderEvents doesn't exist, this throws an error we can catch
+            WorldRenderHelper.register();
+            LOGGER.info("3D Waypoint Rendering initialized.");
+        } catch (Throwable t) {
+            LOGGER.warn("3D World Rendering disabled (API missing in this version): " + t.getMessage());
+        }
+    }
+
+    // Isolated inner class to prevent main class verification failure
+    private static class WorldRenderHelper {
+        static void register() {
+            net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents.AFTER_TRANSLUCENT
+                .register(WaypointWorldRenderer::render);
+        }
+    }
     
-    // ... Keybinding code remains same ...
     private void registerKeybindings() {
         toggleHudKey = registerSafe("lightcraft.key.toggle_hud", GLFW.GLFW_KEY_H);
         toggleMinimapKey = registerSafe("lightcraft.key.toggle_minimap", GLFW.GLFW_KEY_M);
         openConfigKey = registerSafe("lightcraft.key.open_config", GLFW.GLFW_KEY_K);
         addWaypointKey = registerSafe("lightcraft.key.add_waypoint", GLFW.GLFW_KEY_B);
     }
+
     private KeyBinding registerSafe(String name, int code) {
         KeyBinding key = createKeyBinding(name, code, "lightcraft.key.category");
         if (key != null) try { return KeyBindingHelper.registerKeyBinding(key); } catch (Exception e) {}
         return null;
     }
+
     private KeyBinding createKeyBinding(String name, int code, String category) {
-        try { return new KeyBinding(name, InputUtil.Type.KEYSYM, code, category); } catch (Throwable t) { return null; }
+        try { return new KeyBinding(name, InputUtil.Type.KEYSYM, code, category); } catch (Throwable t) { 
+            try { return new KeyBinding(name, code, category); } catch (Throwable t2) { return null; }
+        }
     }
-    // ...
 
     private void onClientTick(MinecraftClient client) {
         if (client.player == null) return;
@@ -96,7 +114,7 @@ public class LightCraftClient implements ClientModInitializer {
             }
         }
         
-        // Inputs
+        // Manual Input Fallback
         long handle = client.getWindow().getHandle();
         boolean f3Down = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_F3) == GLFW.GLFW_PRESS;
 
