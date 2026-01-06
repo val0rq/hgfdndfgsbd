@@ -9,7 +9,6 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.entity.Entity;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -21,10 +20,8 @@ public class HudRenderer {
     private final WaypointManager waypointManager;
     private boolean editMode = false;
     
-    // Reflection Cache
     private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod, drawTextureMethod;
     private static Field matrixField;
-    private static Field xField, yField, zField;
 
     public HudRenderer(ModConfig config, WaypointManager waypointManager) {
         this.config = config;
@@ -70,29 +67,11 @@ public class HudRenderer {
     }
 
     private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
-        double cx, cy, cz;
-        try {
-            Entity camera = client.getCameraEntity();
-            if (camera == null) camera = client.player;
-            
-            if (xField == null) {
-                Class<?> c = Entity.class;
-                for (Field f : c.getDeclaredFields()) {
-                    if (f.getType() == double.class) {
-                        f.setAccessible(true);
-                        if (f.getName().equals("x") || f.getName().equals("field_6014")) xField = f;
-                        if (f.getName().equals("y") || f.getName().equals("field_6036")) yField = f;
-                        if (f.getName().equals("z") || f.getName().equals("field_5969")) zField = f;
-                    }
-                }
-            }
-            
-            if (xField != null && yField != null && zField != null) {
-                cx = xField.getDouble(camera); cy = yField.getDouble(camera); cz = zField.getDouble(camera);
-            } else {
-                cx = client.player.getX(); cy = client.player.getY(); cz = client.player.getZ();
-            }
-        } catch (Throwable t) { return; }
+        if (client.player == null) return;
+        // Use safe coordinate retrieval
+        double cx = client.player.getX();
+        double cy = client.player.getY();
+        double cz = client.player.getZ();
         
         String dim = client.world.getRegistryKey().getValue().toString();
 
@@ -119,16 +98,12 @@ public class HudRenderer {
         try {
             if (drawTextureMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
-                    // Look for drawTexture(Identifier, int x, int y, int u, int v, int w, int h)
-                    // This signature is very common
                     if (m.getParameterCount() == 7 && m.getParameterTypes()[0] == Identifier.class && m.getParameterTypes()[1] == int.class) {
                         drawTextureMethod = m; break;
                     }
                 }
             }
-            if (drawTextureMethod != null) {
-                drawTextureMethod.invoke(context, texture, x, y, u, v, width, height);
-            }
+            if (drawTextureMethod != null) drawTextureMethod.invoke(context, texture, x, y, u, v, width, height);
         } catch (Exception e) {}
     }
 
