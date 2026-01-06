@@ -5,7 +5,7 @@ import com.lightcraft.config.ModConfig;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.*;
-import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.util.ObjectAllocator;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,38 +16,40 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(WorldRenderer.class)
 public class WorldRendererMixin {
 
-    @Inject(method = "render", at = @At("RETURN"))
-    private void onRender(RenderTickCounter tickCounter, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightmapTextureManager lightmapTextureManager, Matrix4f matrix4f, Matrix4f matrix4f2, CallbackInfo ci) {
-        // This runs at the end of the world rendering frame
-        renderWaypoints(tickCounter, camera);
+    // TARGET: public void render(ObjectAllocator, RenderTickCounter, boolean, Camera, GameRenderer, Matrix4f, Matrix4f)
+    @Inject(method = "render(Lnet/minecraft/client/util/ObjectAllocator;Lnet/minecraft/client/render/RenderTickCounter;ZLnet/minecraft/client/render/Camera;Lnet/minecraft/client/render/GameRenderer;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;)V", 
+            at = @At("RETURN"), 
+            require = 0) // IMPORTANT: require=0 prevents crash if signature mismatches!
+    private void onRender(ObjectAllocator allocator, RenderTickCounter tickCounter, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, Matrix4f positionMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
+        renderWaypoints(camera, positionMatrix);
     }
 
-    private void renderWaypoints(RenderTickCounter tickCounter, Camera camera) {
-        if (LightCraftClient.getInstance() == null) return;
-        ModConfig config = LightCraftClient.getInstance().getConfig();
-        if (!config.renderWaypointsInWorld) return;
-
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null) return;
-        String dim = client.world.getRegistryKey().getValue().toString();
-
-        Vec3d camPos = camera.getPos();
-        Tessellator tessellator = Tessellator.getInstance();
-        
-        // Setup Render State
-        RenderSystem.disableDepthTest(); // See through blocks
-        RenderSystem.disableCull();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
-        RenderSystem.lineWidth(2.0f);
-
+    private void renderWaypoints(Camera camera, Matrix4f positionMatrix) {
         try {
+            if (LightCraftClient.getInstance() == null) return;
+            ModConfig config = LightCraftClient.getInstance().getConfig();
+            if (!config.renderWaypointsInWorld) return;
+
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null) return;
+            String dim = client.world.getRegistryKey().getValue().toString();
+
+            // Setup Render State
+            RenderSystem.disableDepthTest();
+            RenderSystem.disableCull();
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            RenderSystem.setShader(GameRenderer::getPositionColorProgram);
+            
+            Tessellator tessellator = Tessellator.getInstance();
+            // Use VertexFormat.DrawMode.DEBUG_LINES for thick, visible lines
             BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
             
-            // We don't have a matrix stack passed in usually at RETURN, so we rely on the buffer's internal translation
-            // But actually we need to offset vertices by -camPos
-            
+            Vec3d camPos = camera.getPos();
+            double cx = camPos.x;
+            double cy = camPos.y;
+            double cz = camPos.z;
+
             for (ModConfig.Waypoint wp : config.waypoints) {
                 if (!wp.enabled || !wp.dimension.equals(dim)) continue;
 
@@ -56,22 +58,20 @@ public class WorldRendererMixin {
                 float b = (wp.color & 0xFF) / 255f;
                 float a = 1.0f;
 
-                double x = wp.x - camPos.x + 0.5;
-                double z = wp.z - camPos.z + 0.5;
-                
-                // Draw a vertical beam from -64 to 320 relative to camera
-                buffer.vertex((float)x, (float)(-64 - camPos.y), (float)z).color(r, g, b, a);
-                buffer.vertex((float)x, (float)(320 - camPos.y), (float)z).color(r, g, b, a);
+                // Draw Vertical Beam
+                buffer.vertex(positionMatrix, (float)(wp.x - cx + 0.5), (float)(-64 - cy), (float)(wp.z - cz + 0.5))
+                      .color(r, g, b, a);
+                      
+                buffer.vertex(positionMatrix, (float)(wp.x - cx + 0.5), (float)(320 - cy), (float)(wp.z - cz + 0.5))
+                      .color(r, g, b, a);
             }
             
             BufferRenderer.drawWithGlobalProgram(buffer.end());
-            
-        } catch (Exception e) {
-            // Rendering errors in mixins can crash the game, better to swallow them if version differs
-        }
 
-        RenderSystem.enableDepthTest();
-        RenderSystem.enableCull();
-        RenderSystem.lineWidth(1.0f);
+            RenderSystem.enableDepthTest();
+            RenderSystem.enableCull();
+        } catch (Exception e) {
+            // Silently fail to avoid crashing the game loop
+        }
     }
 }
