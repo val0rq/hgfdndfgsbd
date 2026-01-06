@@ -8,6 +8,7 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.entity.Entity;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -19,8 +20,10 @@ public class HudRenderer {
     private final WaypointManager waypointManager;
     private boolean editMode = false;
     
+    // Reflection Cache
     private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod;
     private static Field matrixField;
+    private static Field xField, yField, zField;
 
     public HudRenderer(ModConfig config, WaypointManager waypointManager) {
         this.config = config;
@@ -36,12 +39,14 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        // 1. Draw 2D Waypoint Markers
+        // 1. Draw 2D Waypoint Markers (Protected)
         try {
             if (config.renderWaypointsInWorld && client.player != null) {
                 renderFloatingWaypoints(context, client, width, height);
             }
-        } catch (Exception e) {}
+        } catch (Throwable t) {
+            // Silently swallow errors here to keep the game running
+        }
 
         // 2. Draw HUD
         MatrixStack matrices = getMatricesSafe(context);
@@ -62,7 +67,7 @@ public class HudRenderer {
                  drawBorderSafe(context, config.fpsX-2, config.fpsY-2, 60, 16, 0xFFFFFFFF);
                  drawBorderSafe(context, config.coordsX-2, config.coordsY-2, 150, 40, 0xFFFFFFFF);
             }
-        } catch (Exception e) {}
+        } catch (Throwable t) {}
         
         if (matrices != null) {
             matrices.pop();
@@ -70,32 +75,63 @@ public class HudRenderer {
     }
 
     private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
-        // FIXED: Use client.player directly. It is public and won't crash.
-        if (client.player == null) return;
-        Vec3d camPos = client.player.getPos();
+        // SAFE COORDINATE RETRIEVAL
+        double cx, cy, cz;
+        
+        try {
+            // Try getting the render view entity (camera)
+            Entity camera = client.getCameraEntity();
+            if (camera == null) camera = client.player;
+            
+            // "Brute Force" reflection to get X/Y/Z without relying on getPos() method signature
+            if (xField == null) {
+                // Find fields named "x", "y", "z" (intermediary names often match or are very specific)
+                // We assume Entity class has double fields.
+                Class<?> c = Entity.class;
+                // Iterate to find double fields
+                for (Field f : c.getDeclaredFields()) {
+                    if (f.getType() == double.class) {
+                        f.setAccessible(true);
+                        // Heuristic: check names or just grab first 3 doubles? 
+                        // In Intermediary, x/y/z are usually explicit.
+                        if (f.getName().equals("x") || f.getName().equals("field_6014")) xField = f;
+                        if (f.getName().equals("y") || f.getName().equals("field_6036")) yField = f;
+                        if (f.getName().equals("z") || f.getName().equals("field_5969")) zField = f;
+                    }
+                }
+            }
+            
+            if (xField != null && yField != null && zField != null) {
+                cx = xField.getDouble(camera);
+                cy = yField.getDouble(camera);
+                cz = zField.getDouble(camera);
+            } else {
+                // Fallback to client.player accessor if reflection failed
+                cx = client.player.getX();
+                cy = client.player.getY();
+                cz = client.player.getZ();
+            }
+        } catch (Throwable t) {
+            return; // Abort rendering waypoints for this frame
+        }
         
         String dim = client.world.getRegistryKey().getValue().toString();
 
         for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
             if (!wp.enabled || !wp.dimension.equals(dim)) continue;
 
-            double dx = wp.x - camPos.x;
-            double dy = wp.y - camPos.y;
-            double dz = wp.z - camPos.z;
+            double dx = wp.x - cx;
+            double dy = wp.y - cy;
+            double dz = wp.z - cz;
             double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
             
-            if (dist < 2000) {
-                String distStr = wp.name + " " + (int)dist + "m";
+            if (dist < 5000) {
+                String distStr = wp.name + " (" + (int)dist + "m)";
                 int textW = client.textRenderer.getWidth(distStr);
                 
-                // Draw text at the top of the screen (Compass style) if far, or near crosshair if close
-                // This simple logic avoids 3D projection math that crashes on 1.21.11
+                // Draw logic
                 int yPos = (dist < 50) ? h/2 + 20 : 40; 
-                
-                // Color based on distance?
-                int color = wp.color;
-                
-                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, color, true);
+                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, wp.color, true);
             }
         }
     }
