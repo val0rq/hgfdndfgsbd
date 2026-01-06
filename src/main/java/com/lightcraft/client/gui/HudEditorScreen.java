@@ -25,7 +25,7 @@ public class HudEditorScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        HudRenderer.fillSafe(context, 0, 0, width, height, 0x99000000); 
+        HudRenderer.fillSafe(context, 0, 0, width, height, 0xAA000000); 
         
         if (config.hudEditorGridSnap) {
             int size = config.hudEditorGridSize;
@@ -38,18 +38,16 @@ public class HudEditorScreen extends Screen {
         renderer.setEditMode(false);
 
         HudRenderer.drawTextSafe(context, textRenderer, "HUD EDITOR", width/2 - 30, 10, 0xFF00FF00, true);
-        HudRenderer.drawTextSafe(context, textRenderer, "Click & Drag to move. ESC to save.", width/2 - 90, 25, 0xFFAAAAAA, true);
         super.render(context, mouseX, mouseY, delta);
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            int mx = (int)mouseX;
-            int my = (int)mouseY;
+            int mx = (int)mouseX; int my = (int)mouseY;
             float s = config.hudScale;
             
-            // Check Hitbox (Scaled)
+            // Scaled check
             if (hit(mx, my, config.fpsX, config.fpsY, 60, 15, s)) startDrag("FPS", mx, my, config.fpsX, config.fpsY);
             else if (hit(mx, my, config.coordsX, config.coordsY, 150, 40, s)) startDrag("COORDS", mx, my, config.coordsX, config.coordsY);
             else {
@@ -63,11 +61,11 @@ public class HudEditorScreen extends Screen {
     }
     
     private boolean hit(int mx, int my, int x, int y, int w, int h, float scale) {
-        int bx = (int)(x * scale);
-        int by = (int)(y * scale);
-        int bw = (int)(w * scale);
-        int bh = (int)(h * scale);
-        return mx >= bx && mx <= bx + bw && my >= by && my <= by + bh;
+        int sx = (int)(x * scale);
+        int sy = (int)(y * scale);
+        int sw = (int)(w * scale);
+        int sh = (int)(h * scale);
+        return mx >= sx && mx <= sx + sw && my >= sy && my <= sy + sh;
     }
 
     private void startDrag(String elem, int mx, int my, int ex, int ey) {
@@ -82,27 +80,30 @@ public class HudEditorScreen extends Screen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (isDragging && draggedElement != null) {
-            float scale = config.hudScale;
+            float s = config.hudScale;
+            int dx = (int)((mouseX - dragStartX) / s);
+            int dy = (int)((mouseY - dragStartY) / s);
             
-            // Movement calculated in raw screen pixels, then converted back to HUD units
-            int dx = (int)((mouseX - dragStartX) / scale);
-            int dy = (int)((mouseY - dragStartY) / scale);
+            int nx = initialElemX + dx;
+            int ny = initialElemY + dy;
             
-            int newX = initialElemX + dx;
-            int newY = initialElemY + dy;
+            // Clamp
+            if (nx < 0) nx = 0; if (ny < 0) ny = 0;
             
+            // Grid Snap
             if (config.hudEditorGridSnap) {
-                newX = (newX / 10) * 10;
-                newY = (newY / 10) * 10;
+                nx = (nx / 10) * 10;
+                ny = (ny / 10) * 10;
             }
 
-            if (draggedElement.equals("FPS")) { config.fpsX = newX; config.fpsY = newY; }
-            if (draggedElement.equals("COORDS")) { config.coordsX = newX; config.coordsY = newY; }
-            if (draggedElement.equals("MINIMAP")) {
-                int screenW = (int)(width / scale);
-                if (newX > screenW / 2) config.minimapX = newX - screenW;
-                else config.minimapX = newX;
-                config.minimapY = newY;
+            switch(draggedElement) {
+                case "FPS" -> { config.fpsX = nx; config.fpsY = ny; }
+                case "COORDS" -> { config.coordsX = nx; config.coordsY = ny; }
+                case "MINIMAP" -> { 
+                    int sw = (int)(width/s);
+                    if (nx > sw/2) config.minimapX = nx - sw; else config.minimapX = nx;
+                    config.minimapY = ny; 
+                }
             }
             return true;
         }
