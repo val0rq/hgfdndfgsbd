@@ -7,6 +7,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.entity.Entity;
 import java.lang.reflect.Field;
@@ -20,7 +21,6 @@ public class HudRenderer {
     private final WaypointManager waypointManager;
     private boolean editMode = false;
     
-    // Reflection Cache
     private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod;
     private static Field matrixField;
     private static Field xField, yField, zField;
@@ -39,16 +39,14 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        // 1. Draw 2D Waypoint Markers (Protected)
+        // 1. Waypoints
         try {
             if (config.renderWaypointsInWorld && client.player != null) {
-                renderFloatingWaypoints(context, client, width, height);
+                renderWaypoints2D(context, client, width, height, tickDelta);
             }
-        } catch (Throwable t) {
-            // Silently swallow errors here to keep the game running
-        }
+        } catch (Throwable t) {}
 
-        // 2. Draw HUD
+        // 2. HUD
         MatrixStack matrices = getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
@@ -69,80 +67,72 @@ public class HudRenderer {
             }
         } catch (Throwable t) {}
         
-        if (matrices != null) {
-            matrices.pop();
-        }
+        if (matrices != null) matrices.pop();
     }
 
-    private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
-        // SAFE COORDINATE RETRIEVAL
-        double cx, cy, cz;
+    private void renderWaypoints2D(DrawContext context, MinecraftClient client, int w, int h, float tickDelta) {
+        Entity cam = client.getCameraEntity();
+        if (cam == null) cam = client.player;
         
-        try {
-            // Try getting the render view entity (camera)
-            Entity camera = client.getCameraEntity();
-            if (camera == null) camera = client.player;
-            
-            // "Brute Force" reflection to get X/Y/Z without relying on getPos() method signature
-            if (xField == null) {
-                // Find fields named "x", "y", "z" (intermediary names often match or are very specific)
-                // We assume Entity class has double fields.
-                Class<?> c = Entity.class;
-                // Iterate to find double fields
-                for (Field f : c.getDeclaredFields()) {
-                    if (f.getType() == double.class) {
-                        f.setAccessible(true);
-                        // Heuristic: check names or just grab first 3 doubles? 
-                        // In Intermediary, x/y/z are usually explicit.
-                        if (f.getName().equals("x") || f.getName().equals("field_6014")) xField = f;
-                        if (f.getName().equals("y") || f.getName().equals("field_6036")) yField = f;
-                        if (f.getName().equals("z") || f.getName().equals("field_5969")) zField = f;
-                    }
-                }
-            }
-            
-            if (xField != null && yField != null && zField != null) {
-                cx = xField.getDouble(camera);
-                cy = yField.getDouble(camera);
-                cz = zField.getDouble(camera);
-            } else {
-                // Fallback to client.player accessor if reflection failed
-                cx = client.player.getX();
-                cy = client.player.getY();
-                cz = client.player.getZ();
-            }
-        } catch (Throwable t) {
-            return; // Abort rendering waypoints for this frame
-        }
+        // Manual Camera Position
+        double cx = MathHelper.lerp(tickDelta, cam.prevX, cam.getX());
+        double cy = MathHelper.lerp(tickDelta, cam.prevY, cam.getY()) + cam.getStandingEyeHeight();
+        double cz = MathHelper.lerp(tickDelta, cam.prevZ, cam.getZ());
         
+        // Camera Rotation (Radians)
+        float yaw = (float) Math.toRadians(cam.getYaw(tickDelta));
+        float pitch = (float) Math.toRadians(cam.getPitch(tickDelta));
+
         String dim = client.world.getRegistryKey().getValue().toString();
 
         for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
             if (!wp.enabled || !wp.dimension.equals(dim)) continue;
 
-            double dx = wp.x - cx;
-            double dy = wp.y - cy;
-            double dz = wp.z - cz;
-            double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            // Relative Position
+            double dx = wp.x - cx + 0.5;
+            double dy = wp.y - cy + 1.0; // Above block
+            double dz = wp.z - cz + 0.5;
             
-            if (dist < 5000) {
-                String distStr = wp.name + " (" + (int)dist + "m)";
-                int textW = client.textRenderer.getWidth(distStr);
+            // 3D Rotation Math to find Screen Position
+            // Rotate Yaw
+            double x1 = dx * Math.cos(yaw) + dz * Math.sin(yaw);
+            double z1 = dz * Math.cos(yaw) - dx * Math.sin(yaw);
+            // Rotate Pitch
+            double y2 = dy * Math.cos(pitch) + z1 * Math.sin(pitch);
+            double z2 = z1 * Math.cos(pitch) - dy * Math.sin(pitch);
+
+            // Z > 0 means the point is IN FRONT of the camera
+            if (z2 > 0) {
+                // Projection Scale (FOV approx 90ish, factor ~ 1.0)
+                double scale = (double)h / (2.0 * z2); 
                 
-                // Draw logic
-                int yPos = (dist < 50) ? h/2 + 20 : 40; 
-                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, wp.color, true);
+                int screenX = (int) (w / 2.0 - x1 * scale);
+                int screenY = (int) (h / 2.0 - y2 * scale);
+                
+                // Keep on screen? No, strictly projection.
+                // Distance Text
+                double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                String label = wp.name + " (" + (int)dist + "m)";
+                int textW = client.textRenderer.getWidth(label);
+                
+                // Draw floating text
+                if (dist < 5000) {
+                    fillSafe(context, screenX - textW/2 - 2, screenY - 2, screenX + textW/2 + 2, screenY + 10, 0x88000000);
+                    drawTextSafe(context, client.textRenderer, label, screenX - textW/2, screenY, wp.color, true);
+                }
             }
         }
     }
     
-    // --- Safe Reflection Methods ---
+    // Safe Reflection Methods remain same as previous step...
+    // (Ensure drawTextSafe, fillSafe, drawBorderSafe, enableScissorSafe, disableScissorSafe, getMatricesSafe are present)
+    
     public static void drawTextSafe(DrawContext context, TextRenderer tr, String text, int x, int y, int color, boolean shadow) {
         try {
             if (drawTextMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
                     if (m.getName().equals("drawText") || m.getName().equals("method_25303") || 
-                       (m.getParameterCount() == 6 && m.getParameterTypes()[1] == String.class && m.getParameterTypes()[5] == boolean.class)) {
+                       (m.getParameterCount() == 6 && m.getParameterTypes()[1] == String.class)) {
                         drawTextMethod = m; break;
                     }
                 }
@@ -156,7 +146,7 @@ public class HudRenderer {
             if (fillMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
                     if (m.getName().equals("fill") || m.getName().equals("method_25294") ||
-                       (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class && m.getReturnType() == void.class && m.getName().length() < 10)) {
+                       (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class && m.getReturnType() == void.class)) {
                         fillMethod = m; break;
                     }
                 }
