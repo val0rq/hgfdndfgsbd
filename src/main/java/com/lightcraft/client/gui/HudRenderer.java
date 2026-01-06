@@ -7,6 +7,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.util.math.Vec3d;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -15,6 +16,7 @@ public class HudRenderer {
     private final FpsHud fpsHud;
     private final CoordsHud coordsHud;
     private final MinimapHud minimapHud;
+    private final WaypointManager waypointManager;
     private boolean editMode = false;
     
     private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod;
@@ -22,6 +24,7 @@ public class HudRenderer {
 
     public HudRenderer(ModConfig config, WaypointManager waypointManager) {
         this.config = config;
+        this.waypointManager = waypointManager;
         this.fpsHud = new FpsHud(config);
         this.coordsHud = new CoordsHud(config);
         this.minimapHud = new MinimapHud(config, waypointManager);
@@ -33,6 +36,12 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
+        // 1. Draw 2D Waypoint Markers (Floating on screen)
+        if (config.renderWaypointsInWorld && client.player != null) {
+            renderFloatingWaypoints(context, client, width, height);
+        }
+
+        // 2. Draw HUD
         MatrixStack matrices = getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
@@ -51,16 +60,41 @@ public class HudRenderer {
                  drawBorderSafe(context, config.fpsX-2, config.fpsY-2, 60, 16, 0xFFFFFFFF);
                  drawBorderSafe(context, config.coordsX-2, config.coordsY-2, 150, 40, 0xFFFFFFFF);
             }
-        } catch (Exception e) {
-        }
+        } catch (Exception e) {}
         
         if (matrices != null) {
             matrices.pop();
         }
     }
+
+    private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
+        Vec3d cam = client.cameraEntity.getPos();
+        String dim = client.world.getRegistryKey().getValue().toString();
+
+        for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
+            if (!wp.enabled || !wp.dimension.equals(dim)) continue;
+
+            // Simple distance text projection
+            double dx = wp.x - cam.x;
+            double dy = wp.y - cam.y;
+            double dz = wp.z - cam.z;
+            double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            // Only show if reasonably close, or show arrow if far?
+            // For now, let's just show a simple text label at the top of the screen if looking towards it
+            // (True 3D projection requires complex matrix math that might crash on this version)
+            
+            // Fallback: If close (< 100 blocks), show text near center
+            if (dist < 100) {
+                String distStr = wp.name + " (" + (int)dist + "m)";
+                int textW = client.textRenderer.getWidth(distStr);
+                // Draw slightly below crosshair
+                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, h/2 + 20, wp.color, true);
+            }
+        }
+    }
     
     // --- Safe Reflection Methods ---
-
     public static void drawTextSafe(DrawContext context, TextRenderer tr, String text, int x, int y, int color, boolean shadow) {
         try {
             if (drawTextMethod == null) {
@@ -137,7 +171,6 @@ public class HudRenderer {
         } catch (Exception e) {}
     }
 
-    // UPDATED: Now public static so MinimapHud can use it
     public static MatrixStack getMatricesSafe(DrawContext context) {
         try {
             if (matrixMethod != null) return (MatrixStack) matrixMethod.invoke(context);
