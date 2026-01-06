@@ -7,7 +7,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.entity.Entity;
 import java.lang.reflect.Field;
@@ -21,7 +21,8 @@ public class HudRenderer {
     private final WaypointManager waypointManager;
     private boolean editMode = false;
     
-    private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod;
+    // Reflection Cache
+    private static Method matrixMethod, drawTextMethod, fillMethod, borderMethod, scissorOnMethod, scissorOffMethod, drawTextureMethod;
     private static Field matrixField;
     private static Field xField, yField, zField;
 
@@ -39,14 +40,12 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        // 1. Waypoints
         try {
             if (config.renderWaypointsInWorld && client.player != null) {
-                renderWaypoints2D(context, client, width, height, tickDelta);
+                renderFloatingWaypoints(context, client, width, height);
             }
         } catch (Throwable t) {}
 
-        // 2. HUD
         MatrixStack matrices = getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
@@ -70,63 +69,69 @@ public class HudRenderer {
         if (matrices != null) matrices.pop();
     }
 
-    private void renderWaypoints2D(DrawContext context, MinecraftClient client, int w, int h, float tickDelta) {
-        Entity cam = client.getCameraEntity();
-        if (cam == null) cam = client.player;
+    private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
+        double cx, cy, cz;
+        try {
+            Entity camera = client.getCameraEntity();
+            if (camera == null) camera = client.player;
+            
+            if (xField == null) {
+                Class<?> c = Entity.class;
+                for (Field f : c.getDeclaredFields()) {
+                    if (f.getType() == double.class) {
+                        f.setAccessible(true);
+                        if (f.getName().equals("x") || f.getName().equals("field_6014")) xField = f;
+                        if (f.getName().equals("y") || f.getName().equals("field_6036")) yField = f;
+                        if (f.getName().equals("z") || f.getName().equals("field_5969")) zField = f;
+                    }
+                }
+            }
+            
+            if (xField != null && yField != null && zField != null) {
+                cx = xField.getDouble(camera); cy = yField.getDouble(camera); cz = zField.getDouble(camera);
+            } else {
+                cx = client.player.getX(); cy = client.player.getY(); cz = client.player.getZ();
+            }
+        } catch (Throwable t) { return; }
         
-        // Manual Camera Position
-        double cx = MathHelper.lerp(tickDelta, cam.prevX, cam.getX());
-        double cy = MathHelper.lerp(tickDelta, cam.prevY, cam.getY()) + cam.getStandingEyeHeight();
-        double cz = MathHelper.lerp(tickDelta, cam.prevZ, cam.getZ());
-        
-        // Camera Rotation (Radians)
-        float yaw = (float) Math.toRadians(cam.getYaw(tickDelta));
-        float pitch = (float) Math.toRadians(cam.getPitch(tickDelta));
-
         String dim = client.world.getRegistryKey().getValue().toString();
 
         for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
             if (!wp.enabled || !wp.dimension.equals(dim)) continue;
 
-            // Relative Position
-            double dx = wp.x - cx + 0.5;
-            double dy = wp.y - cy + 1.0; // Above block
-            double dz = wp.z - cz + 0.5;
+            double dx = wp.x - cx;
+            double dy = wp.y - cy;
+            double dz = wp.z - cz;
+            double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
             
-            // 3D Rotation Math to find Screen Position
-            // Rotate Yaw
-            double x1 = dx * Math.cos(yaw) + dz * Math.sin(yaw);
-            double z1 = dz * Math.cos(yaw) - dx * Math.sin(yaw);
-            // Rotate Pitch
-            double y2 = dy * Math.cos(pitch) + z1 * Math.sin(pitch);
-            double z2 = z1 * Math.cos(pitch) - dy * Math.sin(pitch);
-
-            // Z > 0 means the point is IN FRONT of the camera
-            if (z2 > 0) {
-                // Projection Scale (FOV approx 90ish, factor ~ 1.0)
-                double scale = (double)h / (2.0 * z2); 
-                
-                int screenX = (int) (w / 2.0 - x1 * scale);
-                int screenY = (int) (h / 2.0 - y2 * scale);
-                
-                // Keep on screen? No, strictly projection.
-                // Distance Text
-                double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-                String label = wp.name + " (" + (int)dist + "m)";
-                int textW = client.textRenderer.getWidth(label);
-                
-                // Draw floating text
-                if (dist < 5000) {
-                    fillSafe(context, screenX - textW/2 - 2, screenY - 2, screenX + textW/2 + 2, screenY + 10, 0x88000000);
-                    drawTextSafe(context, client.textRenderer, label, screenX - textW/2, screenY, wp.color, true);
-                }
+            if (dist < 5000) {
+                String distStr = wp.name + " (" + (int)dist + "m)";
+                int textW = client.textRenderer.getWidth(distStr);
+                int yPos = (dist < 50) ? h/2 + 20 : 40; 
+                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, wp.color, true);
             }
         }
     }
     
-    // Safe Reflection Methods remain same as previous step...
-    // (Ensure drawTextSafe, fillSafe, drawBorderSafe, enableScissorSafe, disableScissorSafe, getMatricesSafe are present)
-    
+    // --- Safe Reflection Methods ---
+
+    public static void drawTextureSafe(DrawContext context, Identifier texture, int x, int y, int u, int v, int width, int height) {
+        try {
+            if (drawTextureMethod == null) {
+                for (Method m : DrawContext.class.getMethods()) {
+                    // Look for drawTexture(Identifier, int x, int y, int u, int v, int w, int h)
+                    // This signature is very common
+                    if (m.getParameterCount() == 7 && m.getParameterTypes()[0] == Identifier.class && m.getParameterTypes()[1] == int.class) {
+                        drawTextureMethod = m; break;
+                    }
+                }
+            }
+            if (drawTextureMethod != null) {
+                drawTextureMethod.invoke(context, texture, x, y, u, v, width, height);
+            }
+        } catch (Exception e) {}
+    }
+
     public static void drawTextSafe(DrawContext context, TextRenderer tr, String text, int x, int y, int color, boolean shadow) {
         try {
             if (drawTextMethod == null) {
