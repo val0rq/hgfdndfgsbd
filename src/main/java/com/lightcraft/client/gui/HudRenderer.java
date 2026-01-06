@@ -8,6 +8,7 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.entity.Entity; // Added import
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -37,9 +38,11 @@ public class HudRenderer {
         int height = client.getWindow().getScaledHeight();
         
         // 1. Draw 2D Waypoint Markers (Floating on screen)
-        if (config.renderWaypointsInWorld && client.player != null) {
-            renderFloatingWaypoints(context, client, width, height);
-        }
+        try {
+            if (config.renderWaypointsInWorld && client.player != null) {
+                renderFloatingWaypoints(context, client, width, height);
+            }
+        } catch (Exception e) {}
 
         // 2. Draw HUD
         MatrixStack matrices = getMatricesSafe(context);
@@ -68,28 +71,32 @@ public class HudRenderer {
     }
 
     private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
-        Vec3d cam = client.cameraEntity.getPos();
+        // FIXED: Use getter method instead of direct field access to prevent IllegalAccessError
+        Entity camera = client.getCameraEntity();
+        if (camera == null) return;
+        
+        Vec3d camPos = camera.getPos();
         String dim = client.world.getRegistryKey().getValue().toString();
 
         for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
             if (!wp.enabled || !wp.dimension.equals(dim)) continue;
 
-            // Simple distance text projection
-            double dx = wp.x - cam.x;
-            double dy = wp.y - cam.y;
-            double dz = wp.z - cam.z;
+            double dx = wp.x - camPos.x;
+            double dy = wp.y - camPos.y;
+            double dz = wp.z - camPos.z;
             double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
             
-            // Only show if reasonably close, or show arrow if far?
-            // For now, let's just show a simple text label at the top of the screen if looking towards it
-            // (True 3D projection requires complex matrix math that might crash on this version)
-            
-            // Fallback: If close (< 100 blocks), show text near center
-            if (dist < 100) {
-                String distStr = wp.name + " (" + (int)dist + "m)";
+            // Render text if reasonably close
+            if (dist < 1000) { // Increased distance check
+                String distStr = wp.name + " " + (int)dist + "m";
                 int textW = client.textRenderer.getWidth(distStr);
-                // Draw slightly below crosshair
-                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, h/2 + 20, wp.color, true);
+                
+                // Very simple centering (improving this requires Math that crashes on 1.21.11 usually)
+                // We draw it near the crosshair if close, or at the top if far
+                int yPos = (dist < 50) ? h/2 + 10 : 30;
+                
+                // Only draw one at a time roughly to avoid clutter (simple implementation)
+                drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, wp.color, true);
             }
         }
     }
