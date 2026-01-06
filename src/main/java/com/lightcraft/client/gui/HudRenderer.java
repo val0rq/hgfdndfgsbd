@@ -33,8 +33,6 @@ public class HudRenderer {
         MinecraftClient client = MinecraftClient.getInstance();
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
-        
-        // Note: 3D Waypoints handled by WorldRendererMixin
 
         MatrixStack matrices = getMatricesSafe(context);
         if (matrices != null) {
@@ -93,7 +91,7 @@ public class HudRenderer {
             if (fillMethod == null) {
                 for (Method m : DrawContext.class.getMethods()) {
                     if (m.getName().equals("fill") || m.getName().equals("method_25294") ||
-                       (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class && m.getReturnType() == void.class)) {
+                       (m.getParameterCount() == 5 && m.getParameterTypes()[0] == int.class)) {
                         fillMethod = m; break;
                     }
                 }
