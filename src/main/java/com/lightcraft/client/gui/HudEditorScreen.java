@@ -25,61 +25,54 @@ public class HudEditorScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Draw a dark background so you know you are in edit mode
-        HudRenderer.fillSafe(context, 0, 0, width, height, 0x80000000);
+        // Modern Background
+        renderGradient(context);
         
-        // Render the HUD elements (so you see what you are moving)
         renderer.setEditMode(true);
         renderer.render(context, delta);
-        renderer.setEditMode(false); // Disable internally so we don't double-draw borders later
+        renderer.setEditMode(false);
         
-        // Draw Grid if snapping is on
-        if (config.hudEditorGridSnap) {
-            drawGrid(context);
-        }
+        if (config.hudEditorGridSnap) drawGrid(context);
 
-        // Draw instructions
-        HudRenderer.drawTextSafe(context, textRenderer, "Drag elements to move", width/2 - 50, 10, 0xFFFFFFFF, true);
-        HudRenderer.drawTextSafe(context, textRenderer, "Press ESC to save", width/2 - 40, height - 20, 0xFFAAAAAA, true);
-        
+        HudRenderer.drawTextSafe(context, textRenderer, "Drag to move | Scale: " + config.hudScale, width/2 - 50, 10, 0xFFFFFFFF, true);
         super.render(context, mouseX, mouseY, delta);
+    }
+    
+    private void renderGradient(DrawContext context) {
+        HudRenderer.fillSafe(context, 0, 0, width, height, 0xAA000000);
     }
     
     private void drawGrid(DrawContext context) {
         int gridSize = config.hudEditorGridSize;
-        for (int x = 0; x < width; x += gridSize) {
-            HudRenderer.fillSafe(context, x, 0, x + 1, height, 0x20FFFFFF);
-        }
-        for (int y = 0; y < height; y += gridSize) {
-            HudRenderer.fillSafe(context, 0, y, width, y + 1, 0x20FFFFFF);
-        }
+        for (int x = 0; x < width; x += gridSize) HudRenderer.fillSafe(context, x, 0, x + 1, height, 0x10FFFFFF);
+        for (int y = 0; y < height; y += gridSize) HudRenderer.fillSafe(context, 0, y, width, y + 1, 0x10FFFFFF);
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0) { // Left Click
-            // Check collision with HUD elements
-            // FPS Box
-            if (isHovering(mouseX, mouseY, config.fpsX, config.fpsY, 60, 16)) {
-                startDrag("FPS", (int)mouseX, (int)mouseY, config.fpsX, config.fpsY);
+        if (button == 0) {
+            // CRITICAL FIX: Scale mouse coord to match HUD coord
+            int scaledX = (int)(mouseX / config.hudScale);
+            int scaledY = (int)(mouseY / config.hudScale);
+            
+            if (isHovering(scaledX, scaledY, config.fpsX, config.fpsY, 60, 16)) {
+                startDrag("FPS", scaledX, scaledY, config.fpsX, config.fpsY);
                 return true;
             }
-            // Coords Box
-            if (isHovering(mouseX, mouseY, config.coordsX, config.coordsY, 150, 40)) {
-                startDrag("COORDS", (int)mouseX, (int)mouseY, config.coordsX, config.coordsY);
+            if (isHovering(scaledX, scaledY, config.coordsX, config.coordsY, 150, 40)) {
+                startDrag("COORDS", scaledX, scaledY, config.coordsX, config.coordsY);
                 return true;
             }
-            // Minimap Box
-            int mmX = config.minimapX < 0 ? width + config.minimapX : config.minimapX;
-            if (isHovering(mouseX, mouseY, mmX, config.minimapY, config.minimapSize, config.minimapSize)) {
-                startDrag("MINIMAP", (int)mouseX, (int)mouseY, mmX, config.minimapY);
+            int mmX = config.minimapX < 0 ? (int)(width/config.hudScale) + config.minimapX : config.minimapX;
+            if (isHovering(scaledX, scaledY, mmX, config.minimapY, config.minimapSize, config.minimapSize)) {
+                startDrag("MINIMAP", scaledX, scaledY, mmX, config.minimapY);
                 return true;
             }
         }
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
-    private boolean isHovering(double mx, double my, int x, int y, int w, int h) {
+    private boolean isHovering(int mx, int my, int x, int y, int w, int h) {
         return mx >= x && mx <= x + w && my >= y && my <= y + h;
     }
 
@@ -93,22 +86,24 @@ public class HudEditorScreen extends Screen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (isDragging && draggedElement != null) {
-            int newX = (int)mouseX - dragOffsetX;
-            int newY = (int)mouseY - dragOffsetY;
+            // Apply scale logic to dragging
+            int scaledX = (int)(mouseX / config.hudScale);
+            int scaledY = (int)(mouseY / config.hudScale);
+            
+            int newX = scaledX - dragOffsetX;
+            int newY = scaledY - dragOffsetY;
 
-            // Grid Snap
             if (config.hudEditorGridSnap) {
                 newX = (newX / config.hudEditorGridSize) * config.hudEditorGridSize;
                 newY = (newY / config.hudEditorGridSize) * config.hudEditorGridSize;
             }
 
-            // Update Config
             switch (draggedElement) {
                 case "FPS" -> { config.fpsX = newX; config.fpsY = newY; }
                 case "COORDS" -> { config.coordsX = newX; config.coordsY = newY; }
                 case "MINIMAP" -> { 
-                    // Handle right-side alignment if dragged past half screen
-                    if (newX > width / 2) config.minimapX = newX - width;
+                    int scaledW = (int)(width / config.hudScale);
+                    if (newX > scaledW / 2) config.minimapX = newX - scaledW;
                     else config.minimapX = newX;
                     config.minimapY = newY; 
                 }
@@ -120,14 +115,9 @@ public class HudEditorScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        isDragging = false;
-        draggedElement = null;
-        manager.saveConfig(config); // Auto-save on drop
+        isDragging = false; draggedElement = null;
+        manager.saveConfig(config);
         return super.mouseReleased(mouseX, mouseY, button);
     }
-    
-    @Override
-    public void close() {
-        MinecraftClient.getInstance().setScreen(null);
-    }
+    @Override public void close() { MinecraftClient.getInstance().setScreen(null); }
 }
