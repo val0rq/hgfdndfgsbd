@@ -8,7 +8,7 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.entity.Entity; // Added import
+import net.minecraft.entity.Entity;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -37,7 +37,7 @@ public class HudRenderer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
         
-        // 1. Draw 2D Waypoint Markers (Floating on screen)
+        // 1. Draw 2D Waypoint Markers (Safe)
         try {
             if (config.renderWaypointsInWorld && client.player != null) {
                 renderFloatingWaypoints(context, client, width, height);
@@ -71,11 +71,9 @@ public class HudRenderer {
     }
 
     private void renderFloatingWaypoints(DrawContext context, MinecraftClient client, int w, int h) {
-        // FIXED: Use getter method instead of direct field access to prevent IllegalAccessError
-        Entity camera = client.getCameraEntity();
-        if (camera == null) return;
+        Vec3d camPos = getEntityPosSafe(client.cameraEntity);
+        if (camPos == null) return;
         
-        Vec3d camPos = camera.getPos();
         String dim = client.world.getRegistryKey().getValue().toString();
 
         for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
@@ -86,22 +84,35 @@ public class HudRenderer {
             double dz = wp.z - camPos.z;
             double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
             
-            // Render text if reasonably close
-            if (dist < 1000) { // Increased distance check
+            if (dist < 1000) {
                 String distStr = wp.name + " " + (int)dist + "m";
                 int textW = client.textRenderer.getWidth(distStr);
-                
-                // Very simple centering (improving this requires Math that crashes on 1.21.11 usually)
-                // We draw it near the crosshair if close, or at the top if far
-                int yPos = (dist < 50) ? h/2 + 10 : 30;
-                
-                // Only draw one at a time roughly to avoid clutter (simple implementation)
+                int yPos = (dist < 50) ? h/2 + 10 : 30; // Closer = lower on screen
                 drawTextSafe(context, client.textRenderer, distStr, w/2 - textW/2, yPos, wp.color, true);
             }
         }
     }
     
-    // --- Safe Reflection Methods ---
+    // --- Bulletproof Reflection Methods ---
+    
+    private static Vec3d getEntityPosSafe(Entity entity) {
+        if (entity == null) return null;
+        try {
+            // Try standard getter
+            return entity.getPos();
+        } catch (Throwable t) {
+            try {
+                // Try fields directly (x, y, z often exist)
+                Field xF = Entity.class.getDeclaredField("x"); xF.setAccessible(true);
+                Field yF = Entity.class.getDeclaredField("y"); yF.setAccessible(true);
+                Field zF = Entity.class.getDeclaredField("z"); zF.setAccessible(true);
+                return new Vec3d(xF.getDouble(entity), yF.getDouble(entity), zF.getDouble(entity));
+            } catch (Exception e) {
+                return null; // Give up safely
+            }
+        }
+    }
+
     public static void drawTextSafe(DrawContext context, TextRenderer tr, String text, int x, int y, int color, boolean shadow) {
         try {
             if (drawTextMethod == null) {
