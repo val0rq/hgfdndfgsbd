@@ -12,7 +12,6 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.RotationAxis;
-import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
 
 public class MinimapHud {
@@ -21,7 +20,6 @@ public class MinimapHud {
     private int[][] colorCache;
     private int lastPlayerX = Integer.MAX_VALUE;
     private int lastPlayerZ = Integer.MAX_VALUE;
-    private long lastUpdate = 0;
     
     public MinimapHud(ModConfig config, WaypointManager wm) {
         this.config = config;
@@ -41,53 +39,64 @@ public class MinimapHud {
         int cx = x + halfSize;
         int cy = y + halfSize;
         
+        // Update Scan
         int px = (int) player.getX();
         int pz = (int) player.getZ();
         
-        // Only update if moved to save FPS
-        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || System.currentTimeMillis() - lastUpdate > 500) {
+        if (Math.abs(px - lastPlayerX) > 0 || Math.abs(pz - lastPlayerZ) > 0 || client.player.age % 20 == 0) {
             updateMapData(client.world, px, (int)player.getY(), pz);
-            lastPlayerX = px; lastPlayerZ = pz; lastUpdate = System.currentTimeMillis();
+            lastPlayerX = px; lastPlayerZ = pz;
         }
 
-        HudRenderer.fillSafe(context, x - 1, y - 1, x + size + 1, y + size + 1, config.minimapBorderColor);
-        HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF000000);
+        // Draw Border & Background
+        HudRenderer.fillSafe(context, x - 2, y - 2, x + size + 2, y + size + 2, 0xFF000000); 
+        HudRenderer.fillSafe(context, x, y, x + size, y + size, 0xFF111111);
         HudRenderer.enableScissorSafe(context, x, y, x+size, y+size);
         
         MatrixStack matrices = HudRenderer.getMatricesSafe(context);
         if (matrices != null) {
             matrices.push();
-            matrices.translate(cx, cy, 0);
+            matrices.translate(x + halfSize, y + halfSize, 0);
             
-            if (config.minimapRotate) {
-                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(player.getYaw() + 180.0f));
-            } else {
-                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(180.0f));
-            }
+            float angle = config.minimapRotate ? player.getYaw() + 180.0f : 180.0f;
+            matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
             
             int zoom = Math.max(1, config.minimapZoom);
-            int renderRange = 50; 
+            int range = 60; 
             
-            for (int rX = -renderRange; rX < renderRange; rX++) {
-                for (int rZ = -renderRange; rZ < renderRange; rZ++) {
+            // Draw Pixels
+            for (int rX = -range; rX < range; rX++) {
+                for (int rZ = -range; rZ < range; rZ++) {
                     int cX = rX + 64;
                     int cZ = rZ + 64;
                     if (cX >= 0 && cX < 128 && cZ >= 0 && cZ < 128) {
                         int color = colorCache[cX][cZ];
                         if (color != 0) {
-                             HudRenderer.fillSafe(context, rX * zoom, rZ * zoom, (rX + 1) * zoom, (rZ + 1) * zoom, color);
+                            HudRenderer.fillSafe(context, rX * zoom, rZ * zoom, (rX + 1) * zoom, (rZ + 1) * zoom, color);
                         }
                     }
                 }
             }
+            
+            // Waypoints
+            for (ModConfig.Waypoint wp : waypointManager.getWaypoints()) {
+                if (!wp.enabled) continue;
+                double dx = (wp.x - player.getX()) * zoom;
+                double dz = (wp.z - player.getZ()) * zoom;
+                if (Math.abs(dx) < halfSize && Math.abs(dz) < halfSize) {
+                    HudRenderer.fillSafe(context, (int)dx - 2, (int)dz - 2, (int)dx + 2, (int)dz + 2, wp.color | 0xFF000000);
+                }
+            }
+
             matrices.pop();
         }
         
-        HudRenderer.fillSafe(context, cx - 1, cy - 1, cx + 1, cy + 1, 0xFF00FF00); // Player
+        // Player Marker
+        HudRenderer.fillSafe(context, x + halfSize - 2, y + halfSize - 2, x + halfSize + 2, y + halfSize + 2, 0xFF00FF00);
         HudRenderer.disableScissorSafe(context);
         
         if (!config.minimapRotate) {
-            HudRenderer.drawTextSafe(context, client.textRenderer, "N", cx - 2, y + 2, 0xFFFFFFFF, true);
+            HudRenderer.drawTextSafe(context, client.textRenderer, "N", x + halfSize - 2, y + 4, 0xFFFFFFFF, true);
         }
     }
     
@@ -99,20 +108,29 @@ public class MinimapHud {
                 int worldX = px + x;
                 int worldZ = pz + z;
                 
-                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, worldX, worldZ);
-                pos.set(worldX, topY - 1, worldZ);
-                
-                BlockState state = world.getBlockState(pos);
-                MapColor mapColor = state.getMapColor(world, pos);
-                int color = (mapColor != null) ? mapColor.color : 0x7F7F7F;
-                
-                if (!state.getFluidState().isEmpty()) color = 0x4040FF;
-                if (color == 0) color = 0x555555;
-                
-                if (topY < py) color = darken(color, 20);
-                if (topY > py) color = brighten(color, 20);
-                
-                colorCache[x + 64][z + 64] = color | 0xFF000000;
+                // RAYCAST SCAN DOWN
+                boolean found = false;
+                for (int y = py + 20; y > -64; y--) {
+                    pos.set(worldX, y, worldZ);
+                    BlockState state = world.getBlockState(pos);
+                    
+                    if (!state.isAir()) {
+                        MapColor mapColor = state.getMapColor(world, pos);
+                        if (mapColor != null) {
+                            int color = mapColor.color;
+                            if (color == 0) color = 0x7F7F7F;
+                            if (!state.getFluidState().isEmpty()) color = 0x4040FF;
+                            
+                            if (y < py) color = darken(color, 30);
+                            else if (y > py) color = brighten(color, 20);
+                            
+                            colorCache[x+64][z+64] = color | 0xFF000000;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) colorCache[x+64][z+64] = 0xFF000000;
             }
         }
     }
